@@ -101,7 +101,7 @@ namespace PRISMA_UI_API
 	/// <returns>The pointer to the API singleton, or nullptr if request failed</returns>
 	[[nodiscard]] inline void* RequestPluginAPI(const InterfaceVersion a_interfaceVersion = InterfaceVersion::V1)
 	{
-		auto pluginHandle = GetModuleHandle("PrismaUI.dll");
+		auto pluginHandle = GetModuleHandle(L"PrismaUI.dll");
 		_RequestPluginAPI requestAPIFunction = (_RequestPluginAPI)GetProcAddress(pluginHandle, "RequestPluginAPI");
 
 		if (requestAPIFunction) {

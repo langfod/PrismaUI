@@ -75,7 +75,7 @@ namespace PrismaUI::Listeners {
 
 		RefPtr<View> inspectorView = nullptr;
 
-		std::shared_lock lock(viewsMutex);
+		std::unique_lock lock(viewsMutex);
 		auto it = views.find(viewId_);
 		if (it != views.end() && it->second) {
 			auto viewData = it->second;

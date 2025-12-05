@@ -362,7 +362,7 @@ namespace PrismaUI::ViewManager {
 	}
 
 	void SetScrollingPixelSize(const Core::PrismaViewId& viewId, int pixelSize) {
-		std::shared_lock lock(viewsMutex);
+		std::unique_lock lock(viewsMutex);
 		auto it = views.find(viewId);
 		if (it != views.end()) {
 			if (pixelSize <= 0) {
@@ -543,7 +543,7 @@ namespace PrismaUI::ViewManager {
 	}
 
 	void SetOrder(const Core::PrismaViewId& viewId, int order) {
-		std::shared_lock lock(viewsMutex);
+		std::unique_lock lock(viewsMutex);
 		auto it = views.find(viewId);
 		if (it != views.end()) {
 			it->second->order = order;

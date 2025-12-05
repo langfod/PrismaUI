@@ -284,11 +284,8 @@ namespace PrismaUI::Inspector {
 			return;
 		}
 
-		// For inspector views, try BitmapSurface
+		// Safe to cast: we use the default BitmapSurfaceFactory, so surface is always a BitmapSurface
 		BitmapSurface* bitmapSurface = static_cast<BitmapSurface*>(surface);
-		if (!bitmapSurface) {
-			return;
-		}
 
 		RefPtr<Bitmap> bitmap = bitmapSurface->bitmap();
 		if (!bitmap || bitmap->IsEmpty()) {

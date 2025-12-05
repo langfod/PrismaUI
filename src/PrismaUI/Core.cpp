@@ -14,7 +14,6 @@ namespace PrismaUI::Core {
 	using namespace PrismaUI::InputHandler;
 
 	SingleThreadExecutor ultralightThread;
-	std::unique_ptr<RepeatingTaskRunner> logicRunner;
 	NanoIdGenerator generator;
 	std::atomic<bool> coreInitialized = false;
 
@@ -45,19 +44,17 @@ namespace PrismaUI::Core {
 		logger::info("Initializing PrismaUI Core System...");
 		InitHooks();
 
-		logicRunner = std::make_unique<RepeatingTaskRunner>([]() {
-			ultralightThread.submit(&UpdateLogic).get();
-			});
-
 		ultralightThread.submit([] {
 			try {
 				Platform& plat = Platform::instance();
 				plat.set_logger(new MyUltralightLogger());
 				plat.set_font_loader(ultralight::GetPlatformFontLoader());
 
-				plat.set_file_system(ultralight::GetPlatformFileSystem("."));
+				auto basePath = std::filesystem::current_path() / "Data" / "PrismaUI";
+				plat.set_file_system(ultralight::GetPlatformFileSystem(basePath.string().c_str()));
 
 				Config config;
+				config.resource_path_prefix = "resources/";
 				plat.set_config(config);
 
 				renderer = Renderer::Create();
@@ -245,6 +242,7 @@ namespace PrismaUI::Core {
 			ProcessEvents();
 
 			if (renderer) {
+				renderer->Update();
 				renderer->RefreshDisplay(0);
 				renderer->Render();
 			}
@@ -306,11 +304,6 @@ namespace PrismaUI::Core {
 		d3dDevice = nullptr;
 		d3dContext = nullptr;
 		hWnd = nullptr;
-
-		if (logicRunner) {
-			logicRunner->stop();
-			logicRunner.reset();
-		}
 
 		{
 			std::unique_lock lock(viewsMutex);

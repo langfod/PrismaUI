@@ -1,0 +1,24 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg-tool/main/docs/vcpkg.schema.json",
+  "dependencies": [
+    "directxmath",
+    "directxtk",
+    "rapidcsv",
+    "fmt",
+    "icu",
+    {
+      "name": "spdlog",
+      "features": ["wchar"]
+    },
+    {
+      "name": "catch2",
+      "features": ["thread-safe-assertions"]
+    }
+  ],
+  "overrides": [
+    {
+      "name": "fmt",
+      "version": "10.2.1"
+    }
+  ]
+}

@@ -8,7 +8,6 @@
 
 #include <Utils/NanoID.h>
 #include <Utils/SingleThreadExecutor.h>
-#include <Utils/RepeatingTaskRunner.h>
 #include <Hooks/Hooks.h>
 #include <Menus/FocusMenu/FocusMenu.h>
 
@@ -99,7 +98,6 @@ namespace PrismaUI::Core {
 	};
 
 	extern SingleThreadExecutor ultralightThread;
-	extern std::unique_ptr<RepeatingTaskRunner> logicRunner;
 	extern NanoIdGenerator generator;
 	extern std::atomic<bool> coreInitialized;
 

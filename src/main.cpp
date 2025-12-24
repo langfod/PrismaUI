@@ -28,15 +28,17 @@ SKSEPlugin_Load(const SKSE::LoadInterface *a_skse) {
   auto g_messaging = reinterpret_cast<SKSE::MessagingInterface *>(
       a_skse->QueryInterface(SKSE::LoadInterface::kMessaging));
 
-  if (!g_messaging) {
-    logger::critical("Failed to load messaging interface! This error is fatal, plugin will not load.");
-    return false;
-  }
+    if (!g_messaging) {
+        logger::critical("Failed to load messaging interface! This error is fatal, plugin will not load.");
+        return false;
+    }
+    
+    SKSE::Init(a_skse);
+    logger::info("---------------- PrismaUI 1.1.1 by StarkMP <discord: starkmp> ----------------");
+    logger::info("-------------------- Docs and Guides: https://prismaui.dev -------------------");
+    SKSE::AllocTrampoline(1 << 10);
 
-  if (!g_messaging->RegisterListener("SKSE", SKSEMessageHandler)) {
-    logger::critical("Failed to register SKSE message listener! Plugin will not load.");
-    return false;
-  }
+    g_messaging->RegisterListener("SKSE", SKSEMessageHandler);
 
   return true;
 }

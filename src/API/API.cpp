@@ -12,9 +12,7 @@ PrismaView PluginAPI::PrismaUIInterface::CreateView(const char* htmlPath, PRISMA
     std::function<void(PrismaUI::Core::PrismaViewId)> domReadyWrapper = nullptr;
     if (onDomReadyCallback) {
         domReadyWrapper = [onDomReadyCallback](PrismaUI::Core::PrismaViewId viewId) {
-            auto task = SKSE::GetTaskInterface();
-
-            task->AddTask([callback = onDomReadyCallback, id = viewId]() {
+            SKSE::GetTaskInterface()->AddTask([callback = onDomReadyCallback, id = viewId]() {
                 callback(id);
             });
         };
@@ -41,10 +39,13 @@ void PluginAPI::PrismaUIInterface::Invoke(PrismaView view, const char* script, P
     ultralight::String _script(processedScript.c_str());
 
     std::function<void(std::string)> callbackWrapper = nullptr;
+
     if (callback) {
         callbackWrapper = [callback](const std::string& result) {
-            callback(result.c_str());
-            };
+            SKSE::GetTaskInterface()->AddTask([targetCallback = callback, data = result]() {
+                targetCallback(data.c_str());
+            });
+        };
     }
     
     return PrismaUI::Communication::Invoke(view, _script, callbackWrapper);
@@ -75,8 +76,10 @@ void PluginAPI::PrismaUIInterface::RegisterJSListener(PrismaView view, const cha
     }
 
     std::function<void(std::string)> callbackWrapper = [callback](const std::string& arg) {
-        callback(arg.c_str());
-        };
+        SKSE::GetTaskInterface()->AddTask([targetCallback = callback, data = arg]() {
+            targetCallback(data.c_str());
+        });
+    };
 
     return PrismaUI::Communication::RegisterJSListener(view, fnName, callbackWrapper);
 }
@@ -89,12 +92,12 @@ bool PluginAPI::PrismaUIInterface::HasFocus(PrismaView view) noexcept
     return PrismaUI::ViewManager::HasFocus(view);
 }
 
-bool PluginAPI::PrismaUIInterface::Focus(PrismaView view, bool pauseGame) noexcept
+bool PluginAPI::PrismaUIInterface::Focus(PrismaView view, bool pauseGame, bool disableFocusMenu) noexcept
 {
     if (!view) {
         return false;
     }
-    return PrismaUI::ViewManager::Focus(view, pauseGame);
+    return PrismaUI::ViewManager::Focus(view, pauseGame, disableFocusMenu);
 }
 
 void PluginAPI::PrismaUIInterface::Unfocus(PrismaView view) noexcept
@@ -132,7 +135,7 @@ bool PluginAPI::PrismaUIInterface::IsHidden(PrismaView view) noexcept
 int PluginAPI::PrismaUIInterface::GetScrollingPixelSize(PrismaView view) noexcept
 {
     if (!view) {
-        return 28;
+        return 0;
     }
     return PrismaUI::ViewManager::GetScrollingPixelSize(view);
 }
@@ -207,4 +210,9 @@ void PluginAPI::PrismaUIInterface::SetInspectorBounds(PrismaView view, float top
         return;
     }
     return PrismaUI::ViewManager::SetInspectorBounds(view, topLeftX, topLeftY, width, height);
+}
+
+bool PluginAPI::PrismaUIInterface::HasAnyActiveFocus() noexcept
+{
+	return PrismaUI::ViewManager::HasAnyActiveFocus();
 }

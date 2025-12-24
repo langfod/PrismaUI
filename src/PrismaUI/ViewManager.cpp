@@ -24,7 +24,14 @@ namespace PrismaUI::ViewManager {
 		}
 
 		Core::PrismaViewId newViewId = generator.generate();
-		std::string fileUrl = "file:///Data/PrismaUI/views/" + htmlPath;
+		
+		// Check if htmlPath is a website URL (starts with http:// or https://)
+		std::string fileUrl;
+		if (htmlPath.substr(0, 7) == "http://" || htmlPath.substr(0, 8) == "https://") {
+			fileUrl = htmlPath;
+		} else {
+			fileUrl = "file:///Data/PrismaUI/views/" + htmlPath;
+		}
 
 		auto viewData = std::make_shared<Core::PrismaView>();
 		viewData->id = newViewId;
@@ -162,19 +169,13 @@ namespace PrismaUI::ViewManager {
 		return views.find(viewId) != views.end();
 	}
 
-	bool Focus(const Core::PrismaViewId& viewId, bool pauseGame) {
+	bool Focus(const Core::PrismaViewId& viewId, bool pauseGame, bool disableFocusMenu) {
 		if (!ViewManager::IsValid(viewId)) {
 			logger::warn("Focus: View ID [{}] not found.", viewId);
 			return false;
 		}
 
-		auto ui = RE::UI::GetSingleton();
-		if (ui && ui->IsMenuOpen(RE::Console::MENU_NAME)) {
-			logger::warn("Focus: Cannot focus view [{}] while console is open.", viewId);
-			return false;
-		}
-
-		ViewOperationQueue::EnqueueOperation(viewId, [viewId, pauseGame]() {
+		ViewOperationQueue::EnqueueOperation(viewId, [viewId, pauseGame, disableFocusMenu]() {
 			std::shared_ptr<PrismaView> viewData = nullptr;
 			{
 				std::shared_lock lock(viewsMutex);
@@ -232,7 +233,10 @@ namespace PrismaUI::ViewManager {
 			// Focus this view
 			viewData->ultralightView->Focus();
 			PrismaUI::InputHandler::EnableInputCapture(viewId);
-			FocusMenu::Open();
+			
+			if (!disableFocusMenu) {
+				FocusMenu::Open();
+			}
 
 			auto controlMap = RE::ControlMap::GetSingleton();
 			controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kWheelZoom, false);
@@ -580,5 +584,27 @@ namespace PrismaUI::ViewManager {
 
 	void SetInspectorBounds(const Core::PrismaViewId& viewId, float topLeftX, float topLeftY, uint32_t width, uint32_t height) {
 		Inspector::SetInspectorBounds(viewId, topLeftX, topLeftY, width, height);
+	}
+
+	bool HasAnyActiveFocus() {
+		std::shared_lock lock(viewsMutex);
+		
+		for (const auto& pair : views) {
+			if (pair.second && pair.second->ultralightView) {
+				auto future = ultralightThread.submit([view_ptr = pair.second->ultralightView]() -> bool {
+					return view_ptr ? view_ptr->HasFocus() : false;
+				});
+				
+				try {
+					if (future.get()) {
+						return true;
+					}
+				} catch (const std::exception& e) {
+					logger::error("HasAnyActiveFocus: Exception checking focus for view: {}", e.what());
+				}
+			}
+		}
+		
+		return false;
 	}
 }

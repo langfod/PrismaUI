@@ -4,7 +4,7 @@ set_xmakever("2.8.2")
 includes("lib/commonlibsse-ng")
 
 set_project("PrismaUI")
-set_version("1.1.0")
+set_version("1.1.1")
 set_license("GPL-3.0")
 
 set_languages("c++23")
@@ -12,11 +12,11 @@ set_warnings("allextra")
 
 set_policy("package.requires_lock", true)
 
--- add_rules("mode.release")
-add_rules("mode.debug", "mode.releasedbg")
+add_rules("mode.release")
+--add_rules("mode.debug", "mode.releasedbg")
 add_rules("plugin.vsxmake.autoupdate")
 
-local ULTRALIGHT_SDK_ROOT = "lib/ultralight-1.4.0"
+local ULTRALIGHT_SDK_ROOT = "lib/ultralight"
 local ULTRALIGHT_INCLUDE_DIR = ULTRALIGHT_SDK_ROOT .. "/include"
 local ULTRALIGHT_BINARY_DIR = ULTRALIGHT_SDK_ROOT .. "/bin"
 local ULTRALIGHT_LIBRARY_DIR = ULTRALIGHT_SDK_ROOT .. "/lib"

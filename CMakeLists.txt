@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 4.1)
 
 project(
     PrismaUI
-    VERSION 1.1.0
+    VERSION 1.1.1
     LANGUAGES CXX
 )
 
@@ -19,10 +19,12 @@ include(ExternalDependencies)
 
 
 # Ultralight SDK paths
-set(ULTRALIGHT_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/lib/ultralight-1.4.0")
+set(ULTRALIGHT_SDK_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/lib/ultralight")
 set(ULTRALIGHT_INCLUDE_DIR "${ULTRALIGHT_SDK_ROOT}/include")
 set(ULTRALIGHT_BINARY_DIR "${ULTRALIGHT_SDK_ROOT}/bin")
 set(ULTRALIGHT_LIBRARY_DIR "${ULTRALIGHT_SDK_ROOT}/lib")
+set(ULTRALIGHT_RESOURCES_DIR "${ULTRALIGHT_SDK_ROOT}/resources")
+set(ULTRALIGHT_INSPECTOR_DIR "${ULTRALIGHT_SDK_ROOT}/inspector")
 
 # Collect source files
 file(GLOB_RECURSE SOURCES
@@ -115,19 +117,15 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E make_directory "${DIST_SKSE_PLUGINS_DIR}"
     
     # Copy assets folder contents to PrismaUI folder
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${CMAKE_SOURCE_DIR}/assets/"
-        "${DIST_PRISMAUI_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/assets/" "${DIST_PRISMAUI_DIR}"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${ULTRALIGHT_RESOURCES_DIR}" "${DIST_PRISMAUI_DIR}/resources"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${ULTRALIGHT_INSPECTOR_DIR}" "${DIST_PRISMAUI_DIR}/inspector"
     
     # Copy Ultralight DLLs to libs folder
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-        "${ULTRALIGHT_BINARY_DIR}"
-        "${DIST_PRISMAUI_DIR}/libs"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory "${ULTRALIGHT_BINARY_DIR}" "${DIST_PRISMAUI_DIR}/libs"
     
     # Copy PrismaUI DLL to SKSE/plugins
-    COMMAND ${CMAKE_COMMAND} -E copy
-        "$<TARGET_FILE:${PROJECT_NAME}>"
-        "${DIST_SKSE_PLUGINS_DIR}/"
+    COMMAND ${CMAKE_COMMAND} -E copy "$<TARGET_FILE:${PROJECT_NAME}>" "${DIST_SKSE_PLUGINS_DIR}/"
     
     # Copy PrismaUI PDB to SKSE/plugins (if exists)
     COMMAND ${CMAKE_COMMAND} -E $<IF:$<BOOL:$<TARGET_PDB_FILE:${PROJECT_NAME}>>,copy,true>

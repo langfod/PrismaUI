@@ -34,7 +34,7 @@ namespace PrismaUI::InputHandler {
 
 	bool IsAnyInputCaptureActive();
 
-	LRESULT CALLBACK HookedWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
+	LRESULT CALLBACK HookedWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 	void ProcessEvents();
 	void Shutdown();
 }

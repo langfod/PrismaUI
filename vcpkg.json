@@ -5,20 +5,9 @@
     "directxtk",
     "rapidcsv",
     "fmt",
-    "icu",
     {
       "name": "spdlog",
       "features": ["wchar"]
-    },
-    {
-      "name": "catch2",
-      "features": ["thread-safe-assertions"]
-    }
-  ],
-  "overrides": [
-    {
-      "name": "fmt",
-      "version": "10.2.1"
     }
   ]
 }

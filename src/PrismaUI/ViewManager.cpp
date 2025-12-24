@@ -30,7 +30,7 @@ namespace PrismaUI::ViewManager {
 		if (htmlPath.substr(0, 7) == "http://" || htmlPath.substr(0, 8) == "https://") {
 			fileUrl = htmlPath;
 		} else {
-			fileUrl = "file:///Data/PrismaUI/views/" + htmlPath;
+			fileUrl = "file:///views/" + htmlPath;
 		}
 
 		auto viewData = std::make_shared<Core::PrismaView>();
@@ -587,24 +587,35 @@ namespace PrismaUI::ViewManager {
 	}
 
 	bool HasAnyActiveFocus() {
-		std::shared_lock lock(viewsMutex);
-		
-		for (const auto& pair : views) {
-			if (pair.second && pair.second->ultralightView) {
-				auto future = ultralightThread.submit([view_ptr = pair.second->ultralightView]() -> bool {
-					return view_ptr ? view_ptr->HasFocus() : false;
-				});
-				
-				try {
-					if (future.get()) {
-						return true;
-					}
-				} catch (const std::exception& e) {
-					logger::error("HasAnyActiveFocus: Exception checking focus for view: {}", e.what());
+		std::vector<ultralight::RefPtr<ultralight::View>> viewPtrs;
+		{
+			std::shared_lock lock(viewsMutex);
+			for (const auto& pair : views) {
+				if (pair.second && pair.second->ultralightView) {
+					viewPtrs.push_back(pair.second->ultralightView);
 				}
 			}
 		}
 		
-		return false;
+		if (viewPtrs.empty()) {
+			return false;
+		}
+
+		// Submit a single task to check all views on the UI thread
+		auto future = ultralightThread.submit([viewPtrs = std::move(viewPtrs)]() -> bool {
+			for (const auto& view_ptr : viewPtrs) {
+				if (view_ptr && view_ptr->HasFocus()) {
+					return true;
+				}
+			}
+			return false;
+		});
+
+		try {
+			return future.get();
+		} catch (const std::exception& e) {
+			logger::error("HasAnyActiveFocus: Exception checking focus: {}", e.what());
+			return false;
+		}
 	}
 }

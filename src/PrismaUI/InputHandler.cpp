@@ -62,7 +62,7 @@ namespace PrismaUI::InputHandler {
                     if (!buttonEvent || buttonEvent->GetDevice() != RE::INPUT_DEVICE::kMouse)
                         break;
 
-                    const auto idCode = buttonEvent->idCode;
+                    const auto idCode = buttonEvent->GetIDCode();
                     bool isPressed = buttonEvent->IsPressed();
                     bool isUp = buttonEvent->IsUp();
 
@@ -123,7 +123,7 @@ namespace PrismaUI::InputHandler {
                                 }
                             }
 
-                            float scrollAmount = SCROLL_LINES_PER_WHEEL_DELTA * scrollPixelSize;
+                            int scrollAmount = SCROLL_LINES_PER_WHEEL_DELTA * scrollPixelSize;
                             if (idCode == 9) {
                                 ev.delta_y = -scrollAmount;
                             }
@@ -263,14 +263,14 @@ namespace PrismaUI::InputHandler {
         return g_isAnyInputCaptureActive.load() && (currentFocused == viewId);
     }
 
-    LRESULT CALLBACK HookedWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
+    LRESULT CALLBACK HookedWndProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam) {
         if (!g_originalWndProc && uMsg != WM_NCDESTROY && uMsg != WM_CREATE) {
-            return DefWindowProc(hWnd, uMsg, wParam, lParam);
+            return DefWindowProc(hwnd, uMsg, wParam, lParam);
         }
 
         if (uMsg == WM_NCHITTEST) {
-            if (g_originalWndProc) return CallWindowProc(g_originalWndProc, hWnd, uMsg, wParam, lParam);
-            return DefWindowProc(hWnd, uMsg, wParam, lParam);
+            if (g_originalWndProc) return CallWindowProc(g_originalWndProc, hwnd, uMsg, wParam, lParam);
+            return DefWindowProc(hwnd, uMsg, wParam, lParam);
         }
 
         if (g_isAnyInputCaptureActive.load()) {
@@ -290,7 +290,7 @@ namespace PrismaUI::InputHandler {
 
                     BYTE kbdState[256];
                     GetKeyboardState(kbdState);
-                    HKL currentLayout = GetKeyboardLayout(GetWindowThreadProcessId(hWnd, NULL));
+                    HKL currentLayout = GetKeyboardLayout(GetWindowThreadProcessId(hwnd, NULL));
 
                     wchar_t translatedChars[5] = { 0 };
                     int charCount = ToUnicodeEx((UINT)wParam, ((lParam >> 16) & 0xFF), kbdState, translatedChars, 4, 0, currentLayout);
@@ -353,9 +353,9 @@ namespace PrismaUI::InputHandler {
         }
 
         if (g_originalWndProc) {
-            return CallWindowProc(g_originalWndProc, hWnd, uMsg, wParam, lParam);
+            return CallWindowProc(g_originalWndProc, hwnd, uMsg, wParam, lParam);
         }
-        return DefWindowProc(hWnd, uMsg, wParam, lParam);
+        return DefWindowProc(hwnd, uMsg, wParam, lParam);
     }
 
     void ProcessEvents() {

@@ -134,7 +134,7 @@ namespace PrismaUI::Core {
 
 			if (!cursorTexture && d3dDevice) {
 				try {
-					DirectX::CreateWICTextureFromFile(d3dDevice, L"Data/PrismaUI/misc/cursor.png", nullptr, &cursorTexture);
+					DirectX::CreateWICTextureFromFile(d3dDevice, L"misc/cursor.png", nullptr, &cursorTexture);
 					logger::info("Cursor texture loaded successfully.");
 				}
 				catch (const std::exception& e) {

@@ -3,22 +3,27 @@
 #include "PrismaUI/ViewManager.h"
 #include "PrismaUI/Communication.h"
 
+namespace {
+    std::function<void(PrismaUI::Core::PrismaViewId)> WrapDomReadyCallback(PRISMA_UI_API::OnDomReadyCallback callback)
+    {
+        if (!callback) {
+            return nullptr;
+        }
+        return [callback](PrismaUI::Core::PrismaViewId viewId) {
+            SKSE::GetTaskInterface()->AddTask([cb = callback, id = viewId]() {
+                cb(id);
+            });
+        };
+    }
+}  // namespace
+
 PrismaView PluginAPI::PrismaUIInterface::CreateView(const char* htmlPath, PRISMA_UI_API::OnDomReadyCallback onDomReadyCallback) noexcept
 {
     if (!htmlPath) {
         return 0;
     }
 
-    std::function<void(PrismaUI::Core::PrismaViewId)> domReadyWrapper = nullptr;
-    if (onDomReadyCallback) {
-        domReadyWrapper = [onDomReadyCallback](PrismaUI::Core::PrismaViewId viewId) {
-            SKSE::GetTaskInterface()->AddTask([callback = onDomReadyCallback, id = viewId]() {
-                callback(id);
-            });
-        };
-    }
-
-    return PrismaUI::ViewManager::Create(htmlPath, domReadyWrapper);
+    return PrismaUI::ViewManager::Create(htmlPath, WrapDomReadyCallback(onDomReadyCallback));
 }
 
 void PluginAPI::PrismaUIInterface::Invoke(PrismaView view, const char* script, PRISMA_UI_API::JSCallback callback) noexcept
@@ -221,4 +226,13 @@ void PluginAPI::PrismaUIInterface::SetInspectorBounds(PrismaView view, float top
 bool PluginAPI::PrismaUIInterface::HasAnyActiveFocus() noexcept
 {
 	return PrismaUI::ViewManager::HasAnyActiveFocus();
+}
+
+PrismaView PluginAPI::PrismaUIInterface::CreateViewAccelerated(const char* htmlPath, PRISMA_UI_API::OnDomReadyCallback onDomReadyCallback) noexcept
+{
+    if (!htmlPath) {
+        return 0;
+    }
+
+    return PrismaUI::ViewManager::Create(htmlPath, true, WrapDomReadyCallback(onDomReadyCallback));
 }

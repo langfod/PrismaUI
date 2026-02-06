@@ -18,7 +18,7 @@ set(CMAKE_JOB_POOL_COMPILE compile)
 set(CMAKE_JOB_POOL_LINK link)
 set(CMAKE_INSTALL_MESSAGE LAZY)
 
-project(PrismaUI VERSION 1.3.1 LANGUAGES CXX)
+project(PrismaUI VERSION 1.4.0 LANGUAGES CXX)
 
 # Set build root for external builds
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
@@ -57,6 +57,7 @@ target_include_directories(${PROJECT_NAME}
     PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${ULTRALIGHT_INCLUDE_DIR}"
+    "${ULTRALIGHT_SDK_ROOT}/shaders/generated/headers"
 )
 
 # Link directories for Ultralight

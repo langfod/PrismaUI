@@ -35,6 +35,10 @@
 #include "Utils/NanoID.h"
 #include "Utils/SingleThreadExecutor.h"
 
+namespace PrismaUI::GPU {
+    class GPUDriverD3D11;
+}
+
 namespace PrismaUI::Listeners {
     class MyLoadListener;
     class MyViewListener;
@@ -52,6 +56,7 @@ namespace PrismaUI::Core {
         std::string htmlPathToLoad;
         std::string originalUrl;    // Original URL from view creation (for recovery)
         std::string lastLoadedUrl;  // Track last successfully loaded URL
+        bool isAccelerated = false; // Whether this view uses GPU-accelerated rendering
         std::atomic<bool> isHidden = false;
         std::unique_ptr<Listeners::MyLoadListener> loadListener;
         std::unique_ptr<Listeners::MyViewListener> viewListener;
@@ -117,6 +122,7 @@ namespace PrismaUI::Core {
     extern std::unique_ptr<DirectX::SpriteBatch> spriteBatch;
     extern std::unique_ptr<DirectX::CommonStates> commonStates;
     extern Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> cursorTexture;
+    extern std::unique_ptr<GPU::GPUDriverD3D11> gpuDriver;
 
     extern std::map<PrismaViewId, std::shared_ptr<PrismaView>> views;
     extern std::shared_mutex viewsMutex;

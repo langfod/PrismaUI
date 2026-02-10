@@ -46,6 +46,9 @@ public:
 		virtual bool IsInspectorVisible(PrismaView view) noexcept override;
 		virtual void SetInspectorBounds(PrismaView view, float topLeftX, float topLeftY, unsigned int width, unsigned int height) noexcept override;
 
+		// GPU-accelerated view creation
+		virtual PrismaView CreateViewAccelerated(const char* htmlPath, PRISMA_UI_API::OnDomReadyCallback onDomReadyCallback = nullptr) noexcept override;
+
 	private:
 		unsigned long apiTID = 0;
 	};

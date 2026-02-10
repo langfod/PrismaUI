@@ -10,6 +10,11 @@ namespace PrismaUI::ViewManager {
     using namespace Core;
 
     Core::PrismaViewId Create(const std::string& htmlPath, std::function<void(Core::PrismaViewId)> onDomReadyCallback) {
+        return Create(htmlPath, false, std::move(onDomReadyCallback));
+    }
+
+    Core::PrismaViewId Create(const std::string& htmlPath, bool isAccelerated,
+                              std::function<void(Core::PrismaViewId)> onDomReadyCallback) {
         bool expected_init = false;
         if (coreInitialized.compare_exchange_strong(expected_init, true)) {
             Core::InitializeCoreSystem();
@@ -38,8 +43,9 @@ namespace PrismaUI::ViewManager {
         viewData->ultralightView = nullptr;
         viewData->htmlPathToLoad = fileUrl;
         viewData->originalUrl = fileUrl;  // Store for recovery after exceptions
+        viewData->isAccelerated = isAccelerated;
         viewData->isHidden = false;
-        viewData->domReadyCallback = onDomReadyCallback;
+        viewData->domReadyCallback = std::move(onDomReadyCallback);
 
         {
             std::unique_lock lock(viewsMutex);
@@ -58,8 +64,9 @@ namespace PrismaUI::ViewManager {
         }
 
         logger::info(
-            "View [{}] creation requested for path: {} with order <{}>. Actual view will be created by UI thread.",
-            newViewId, fileUrl, viewData->order);
+            "View [{}] creation requested for path: {} with order <{}>, accelerated={}. Actual view will be created by "
+            "UI thread.",
+            newViewId, fileUrl, viewData->order, isAccelerated);
 
         return newViewId;
     }

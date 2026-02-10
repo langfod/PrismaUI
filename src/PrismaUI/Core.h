@@ -32,8 +32,13 @@
 
 #include "Hooks/Hooks.h"
 #include "Menus/FocusMenu/FocusMenu.h"
+#include "Utils/AlignedAllocator.h"
 #include "Utils/NanoID.h"
 #include "Utils/SingleThreadExecutor.h"
+
+namespace PrismaUI::GPU {
+    class GPUDriverD3D11;
+}
 
 namespace PrismaUI::Listeners {
     class MyLoadListener;
@@ -52,6 +57,7 @@ namespace PrismaUI::Core {
         std::string htmlPathToLoad;
         std::string originalUrl;    // Original URL from view creation (for recovery)
         std::string lastLoadedUrl;  // Track last successfully loaded URL
+        bool isAccelerated = false; // Whether this view uses GPU-accelerated rendering
         std::atomic<bool> isHidden = false;
         std::unique_ptr<Listeners::MyLoadListener> loadListener;
         std::unique_ptr<Listeners::MyViewListener> viewListener;
@@ -65,7 +71,8 @@ namespace PrismaUI::Core {
         std::atomic<int> recoveryAttempts = 0;    // Track recovery attempts to prevent loops
 
         // Inspector rendering data
-        std::vector<std::byte> inspectorPixelBuffer;
+        // 32-byte aligned buffer for optimal SIMD performance
+        std::vector<std::byte, Utils::AlignedAllocator<std::byte, 32>> inspectorPixelBuffer;
         uint32_t inspectorBufferWidth = 0;
         uint32_t inspectorBufferHeight = 0;
         uint32_t inspectorBufferStride = 0;
@@ -87,7 +94,9 @@ namespace PrismaUI::Core {
         ID3D11ShaderResourceView* textureView = nullptr;
         uint32_t textureWidth = 0;
         uint32_t textureHeight = 0;
-        std::vector<std::byte> pixelBuffer;
+        // 32-byte aligned buffer for optimal SIMD performance (AVX2)
+        // Also works perfectly fine for SSE2 and AVX (they use 16-byte alignment)
+        std::vector<std::byte, Utils::AlignedAllocator<std::byte, 32>> pixelBuffer;
         uint32_t bufferWidth = 0;
         uint32_t bufferHeight = 0;
         uint32_t bufferStride = 0;
@@ -117,6 +126,7 @@ namespace PrismaUI::Core {
     extern std::unique_ptr<DirectX::SpriteBatch> spriteBatch;
     extern std::unique_ptr<DirectX::CommonStates> commonStates;
     extern Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> cursorTexture;
+    extern std::unique_ptr<GPU::GPUDriverD3D11> gpuDriver;
 
     extern std::map<PrismaViewId, std::shared_ptr<PrismaView>> views;
     extern std::shared_mutex viewsMutex;

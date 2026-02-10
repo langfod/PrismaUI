@@ -2,6 +2,7 @@
 #include "Menus/CursorMenu/CursorMenu.h"
 #include "PrismaUI_API.h"
 #include "Utils/DllLoader.h"
+#include "Utils/SIMDDispatch.h"
 #include <spdlog/sinks/basic_file_sink.h>
 
 static void SKSEMessageHandler(SKSE::MessagingInterface::Message *message) {
@@ -30,6 +31,12 @@ SKSEPlugin_Load(const SKSE::LoadInterface *a_skse) {
     logger::critical("Failed to load Ultralight libraries! Plugin will not load.");
     return false;
   }
+
+  // Initialize SIMD dispatcher - detect CPU capabilities and select optimal implementations
+  PrismaUI::SIMD::Initialize();
+  logger::info("SIMD initialized");
+  auto activeSIMD = PrismaUI::SIMD::GetActiveInstructionSet();
+  logger::info("SIMD initialized with {} instruction set", PrismaUI::SIMD::GetInstructionSetName(activeSIMD));
 
   auto g_messaging = reinterpret_cast<SKSE::MessagingInterface *>(
       a_skse->QueryInterface(SKSE::LoadInterface::kMessaging));

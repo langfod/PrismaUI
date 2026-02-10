@@ -18,6 +18,8 @@ namespace PrismaUI::ViewManager {
 
     Core::PrismaViewId Create(const std::string& htmlPath,
                               std::function<void(Core::PrismaViewId)> onDomReadyCallback = nullptr);
+    Core::PrismaViewId Create(const std::string& htmlPath, bool isAccelerated,
+                              std::function<void(Core::PrismaViewId)> onDomReadyCallback = nullptr);
     void Show(const Core::PrismaViewId& viewId);
     void Hide(const Core::PrismaViewId& viewId);
     bool IsHidden(const Core::PrismaViewId& viewId);

@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 4.1)
+cmake_minimum_required(VERSION 3.21)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,7 +18,7 @@ set(CMAKE_JOB_POOL_COMPILE compile)
 set(CMAKE_JOB_POOL_LINK link)
 set(CMAKE_INSTALL_MESSAGE LAZY)
 
-project(PrismaUI VERSION 1.3.1 LANGUAGES CXX)
+project(PrismaUI VERSION 1.4.1 LANGUAGES CXX)
 
 # Set build root for external builds
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
@@ -32,6 +32,18 @@ include(ExternalDependencies)
 file(GLOB_RECURSE SOURCES
     "src/*.cpp"
     "src/*.h"
+)
+
+# Separate SIMD implementation files for custom compilation flags
+set(SIMD_SSE2_SOURCES "src/Utils/SIMDImplementations_SSE2.cpp")
+set(SIMD_AVX_SOURCES "src/Utils/SIMDImplementations_AVX.cpp")
+set(SIMD_AVX2_SOURCES "src/Utils/SIMDImplementations_AVX2.cpp")
+
+# Remove SIMD files from main source list (we'll add them back with custom flags)
+list(REMOVE_ITEM SOURCES 
+    "${CMAKE_CURRENT_SOURCE_DIR}/${SIMD_SSE2_SOURCES}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/${SIMD_AVX_SOURCES}"
+    "${CMAKE_CURRENT_SOURCE_DIR}/${SIMD_AVX2_SOURCES}"
 )
 
 # Create source groups for IDE
@@ -52,11 +64,37 @@ add_commonlibsse_plugin(${PROJECT_NAME}
     SOURCES ${SOURCES}
 )
 
+# Add SIMD implementation files with custom compilation flags
+target_sources(${PROJECT_NAME} PRIVATE ${SIMD_SSE2_SOURCES})
+target_sources(${PROJECT_NAME} PRIVATE ${SIMD_AVX_SOURCES})
+target_sources(${PROJECT_NAME} PRIVATE ${SIMD_AVX2_SOURCES})
+
+# Set SSE2 flags (baseline, but explicit for clarity)
+set_source_files_properties(${SIMD_SSE2_SOURCES} PROPERTIES
+    COMPILE_FLAGS "/arch:SSE2"
+)
+
+# Set AVX flags
+set_source_files_properties(${SIMD_AVX_SOURCES} PROPERTIES
+    COMPILE_FLAGS "/arch:AVX"
+)
+
+# Set AVX2 flags
+set_source_files_properties(${SIMD_AVX2_SOURCES} PROPERTIES
+    COMPILE_FLAGS "/arch:AVX2"
+)
+
+message(STATUS "SIMD implementations will be compiled with runtime dispatch:")
+message(STATUS "  SSE2: ${SIMD_SSE2_SOURCES}")
+message(STATUS "  AVX:  ${SIMD_AVX_SOURCES}")
+message(STATUS "  AVX2: ${SIMD_AVX2_SOURCES}")
+
 # Include directories
 target_include_directories(${PROJECT_NAME}
     PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
     "${ULTRALIGHT_INCLUDE_DIR}"
+    "${ULTRALIGHT_SDK_ROOT}/shaders/generated/headers"
 )
 
 # Link directories for Ultralight
@@ -74,6 +112,10 @@ target_link_libraries(${PROJECT_NAME}
     WebCore
     comctl32  # Required for SetWindowSubclass/RemoveWindowSubclass
 )
+
+# Find and link cpuinfo for runtime SIMD detection
+find_package(cpuinfo CONFIG REQUIRED)
+target_link_libraries(${PROJECT_NAME} PRIVATE cpuinfo::cpuinfo)
 
 # Delay-load Ultralight DLLs so they can be loaded from custom path at runtime
 target_link_options(${PROJECT_NAME}

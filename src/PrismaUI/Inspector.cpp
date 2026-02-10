@@ -7,6 +7,7 @@
 
 #include "Core.h"
 #include "Utils/DllLoader.h"
+#include "Utils/SIMDDispatch.h"
 #include "ViewManager.h"
 
 #ifdef min
@@ -313,7 +314,8 @@ namespace PrismaUI::Inspector {
                 viewData->inspectorPixelBuffer.resize(dataSize);
             }
 
-            std::memcpy(viewData->inspectorPixelBuffer.data(), pixels, dataSize);
+            // Use SIMD-optimized memcpy
+            SIMD::FastMemcpy(viewData->inspectorPixelBuffer.data(), pixels, dataSize);
 
             viewData->inspectorBufferWidth = width;
             viewData->inspectorBufferHeight = height;
@@ -387,12 +389,8 @@ namespace PrismaUI::Inspector {
         D3D11_MAPPED_SUBRESOURCE mapped;
         HRESULT hr = d3dContext->Map(viewData->inspectorTexture, 0, D3D11_MAP_WRITE_DISCARD, 0, &mapped);
         if (SUCCEEDED(hr)) {
-            const uint8_t* src = static_cast<const uint8_t*>(pixels);
-            uint8_t* dst = static_cast<uint8_t*>(mapped.pData);
-
-            for (uint32_t row = 0; row < height; ++row) {
-                std::memcpy(dst + row * mapped.RowPitch, src + row * stride, width * BYTES_PER_PIXEL);
-            }
+            // Use SIMD-optimized pixel copying
+            SIMD::CopyPixels(mapped.pData, mapped.RowPitch, pixels, stride, width, height);
 
             d3dContext->Unmap(viewData->inspectorTexture, 0);
         } else {

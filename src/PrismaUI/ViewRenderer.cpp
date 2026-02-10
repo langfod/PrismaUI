@@ -1,8 +1,10 @@
 ﻿#include "ViewRenderer.h"
 
 #include "Core.h"
+#include "GPU/GPUDriverD3D11.h"
 #include "InputHandler.h"
 #include "Inspector.h"
+#include "Utils/SIMDDispatch.h"
 
 namespace PrismaUI::ViewRenderer {
     using namespace Core;
@@ -38,6 +40,13 @@ namespace PrismaUI::ViewRenderer {
 
     void RenderSingleView(std::shared_ptr<Core::PrismaView> viewData) {
         if (!viewData || !viewData->ultralightView) return;
+
+        if (viewData->isAccelerated) {
+            // GPU driver handles rendering directly to texture via command list
+            // No bitmap extraction needed — just render inspector if applicable
+            Inspector::RenderInspectorView(viewData);
+            return;
+        }
 
         Surface* surface_base = viewData->ultralightView->surface();
         if (!surface_base) return;
@@ -82,7 +91,8 @@ namespace PrismaUI::ViewRenderer {
                 if (viewData->pixelBuffer.size() != required_size) {
                     viewData->pixelBuffer.resize(required_size);
                 }
-                memcpy(viewData->pixelBuffer.data(), pixels, required_size);
+                // Use SIMD-optimized memcpy
+                SIMD::FastMemcpy(viewData->pixelBuffer.data(), pixels, required_size);
                 viewData->bufferWidth = width;
                 viewData->bufferHeight = height;
                 viewData->bufferStride = stride;
@@ -209,15 +219,8 @@ namespace PrismaUI::ViewRenderer {
             return;
         }
 
-        std::byte* source = static_cast<std::byte*>(pixels);
-        std::byte* dest = static_cast<std::byte*>(mappedResource.pData);
-        uint32_t destPitch = mappedResource.RowPitch;
-
-        if (destPitch == stride) {
-            memcpy(dest, source, (size_t)height * stride);
-        } else {
-            for (uint32_t y = 0; y < height; ++y) memcpy(dest + y * destPitch, source + y * stride, stride);
-        }
+        // Use SIMD-optimized pixel copying
+        SIMD::CopyPixels(mappedResource.pData, mappedResource.RowPitch, pixels, stride, width, height);
 
         d3dContext->Unmap(viewData->texture, 0);
     }
@@ -271,9 +274,19 @@ namespace PrismaUI::ViewRenderer {
             std::shared_lock lock(viewsMutex);
             viewsToDraw.reserve(views.size());
             for (const auto& pair : views) {
-                if (pair.second && !pair.second->isHidden.load() && !pair.second->pendingResourceRelease.load() &&
-                    pair.second->textureView) {
-                    viewsToDraw.push_back(pair.second);
+                if (!pair.second || pair.second->isHidden.load() || pair.second->pendingResourceRelease.load())
+                    continue;
+
+                if (pair.second->isAccelerated) {
+                    // Accelerated views get their SRV from the GPU driver
+                    if (pair.second->ultralightView && gpuDriver) {
+                        viewsToDraw.push_back(pair.second);
+                    }
+                } else {
+                    // Software views use their textureView
+                    if (pair.second->textureView) {
+                        viewsToDraw.push_back(pair.second);
+                    }
                 }
             }
         }
@@ -319,13 +332,33 @@ namespace PrismaUI::ViewRenderer {
     }
 
     void DrawSingleTexture(std::shared_ptr<Core::PrismaView> viewData) {
-        if (!viewData || !viewData->textureView || viewData->textureWidth == 0 || viewData->textureHeight == 0) return;
+        if (!viewData) return;
+
+        ID3D11ShaderResourceView* srv = nullptr;
+        uint32_t texWidth = 0;
+        uint32_t texHeight = 0;
+
+        if (viewData->isAccelerated) {
+            if (!gpuDriver || !viewData->ultralightView) return;
+            srv = gpuDriver->GetShaderResourceView(viewData->ultralightView.get());
+            if (!srv) return;
+            auto rt = viewData->ultralightView->render_target();
+            texWidth = rt.width;
+            texHeight = rt.height;
+        } else {
+            if (!viewData->textureView || viewData->textureWidth == 0 || viewData->textureHeight == 0) return;
+            srv = viewData->textureView;
+            texWidth = viewData->textureWidth;
+            texHeight = viewData->textureHeight;
+        }
+
+        if (!srv || texWidth == 0 || texHeight == 0) return;
 
         // Draw main view
         DirectX::SimpleMath::Vector2 position(0.0f, 0.0f);
-        RECT sourceRect = {0, 0, (long)viewData->textureWidth, (long)viewData->textureHeight};
+        RECT sourceRect = {0, 0, (long)texWidth, (long)texHeight};
 
-        spriteBatch->Draw(viewData->textureView, position, &sourceRect, DirectX::Colors::White, 0.f,
+        spriteBatch->Draw(srv, position, &sourceRect, DirectX::Colors::White, 0.f,
                           DirectX::SimpleMath::Vector2::Zero, 1.0f, DirectX::SpriteEffects_None, 0.f);
 
         // Draw inspector overlay if visible

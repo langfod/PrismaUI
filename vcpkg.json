@@ -4,6 +4,7 @@
     "directxmath",
     "directxtk",
     "rapidcsv",
+    "cpuinfo",
     "fmt",
     {
       "name": "spdlog",

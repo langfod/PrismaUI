@@ -4,6 +4,7 @@
 #include "GPU/GPUDriverD3D11.h"
 #include "InputHandler.h"
 #include "Inspector.h"
+#include "Utils/SIMDDispatch.h"
 
 namespace PrismaUI::ViewRenderer {
     using namespace Core;
@@ -90,7 +91,8 @@ namespace PrismaUI::ViewRenderer {
                 if (viewData->pixelBuffer.size() != required_size) {
                     viewData->pixelBuffer.resize(required_size);
                 }
-                memcpy(viewData->pixelBuffer.data(), pixels, required_size);
+                // Use SIMD-optimized memcpy
+                SIMD::FastMemcpy(viewData->pixelBuffer.data(), pixels, required_size);
                 viewData->bufferWidth = width;
                 viewData->bufferHeight = height;
                 viewData->bufferStride = stride;
@@ -217,15 +219,8 @@ namespace PrismaUI::ViewRenderer {
             return;
         }
 
-        std::byte* source = static_cast<std::byte*>(pixels);
-        std::byte* dest = static_cast<std::byte*>(mappedResource.pData);
-        uint32_t destPitch = mappedResource.RowPitch;
-
-        if (destPitch == stride) {
-            memcpy(dest, source, (size_t)height * stride);
-        } else {
-            for (uint32_t y = 0; y < height; ++y) memcpy(dest + y * destPitch, source + y * stride, stride);
-        }
+        // Use SIMD-optimized pixel copying
+        SIMD::CopyPixels(mappedResource.pData, mappedResource.RowPitch, pixels, stride, width, height);
 
         d3dContext->Unmap(viewData->texture, 0);
     }

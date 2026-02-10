@@ -509,9 +509,12 @@ namespace PrismaUI::GPU {
         cbdata.Scalar4[1] = {state.uniform_scalar[4], state.uniform_scalar[5], state.uniform_scalar[6],
                              state.uniform_scalar[7]};
 
-        for (size_t i = 0; i < 8; ++i)
-            cbdata.Vector[i] = DirectX::XMFLOAT4(state.uniform_vector[i].x, state.uniform_vector[i].y,
-                                                 state.uniform_vector[i].z, state.uniform_vector[i].w);
+        // Use DirectXMath SIMD operations for vector conversion
+        for (size_t i = 0; i < 8; ++i) {
+            DirectX::XMVECTOR vec = DirectX::XMVectorSet(state.uniform_vector[i].x, state.uniform_vector[i].y,
+                                                         state.uniform_vector[i].z, state.uniform_vector[i].w);
+            DirectX::XMStoreFloat4(&cbdata.Vector[i], vec);
+        }
 
         cbdata.ClipData = {static_cast<int32_t>(state.clip_size), 0, 0, 0};
         for (size_t i = 0; i < state.clip_size; ++i) cbdata.Clip[i] = DirectX::XMMATRIX(state.clip[i].data);

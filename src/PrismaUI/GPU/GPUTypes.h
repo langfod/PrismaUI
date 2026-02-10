@@ -31,7 +31,8 @@ namespace PrismaUI::GPU {
         uint32_t RenderTargetTextureId = 0;
     };
 
-    struct CB_UltralightData {
+    // Ensure 16-byte alignment for XMMATRIX types (required by DirectXMath and D3D11)
+    struct alignas(16) CB_UltralightData {
         DirectX::XMFLOAT4 State;
         DirectX::XMMATRIX Transform;
         DirectX::XMINT4   Integer4[2];

@@ -32,6 +32,7 @@
 
 #include "Hooks/Hooks.h"
 #include "Menus/FocusMenu/FocusMenu.h"
+#include "Utils/AlignedAllocator.h"
 #include "Utils/NanoID.h"
 #include "Utils/SingleThreadExecutor.h"
 
@@ -70,7 +71,8 @@ namespace PrismaUI::Core {
         std::atomic<int> recoveryAttempts = 0;    // Track recovery attempts to prevent loops
 
         // Inspector rendering data
-        std::vector<std::byte> inspectorPixelBuffer;
+        // 32-byte aligned buffer for optimal SIMD performance
+        std::vector<std::byte, Utils::AlignedAllocator<std::byte, 32>> inspectorPixelBuffer;
         uint32_t inspectorBufferWidth = 0;
         uint32_t inspectorBufferHeight = 0;
         uint32_t inspectorBufferStride = 0;
@@ -92,7 +94,9 @@ namespace PrismaUI::Core {
         ID3D11ShaderResourceView* textureView = nullptr;
         uint32_t textureWidth = 0;
         uint32_t textureHeight = 0;
-        std::vector<std::byte> pixelBuffer;
+        // 32-byte aligned buffer for optimal SIMD performance (AVX2)
+        // Also works perfectly fine for SSE2 and AVX (they use 16-byte alignment)
+        std::vector<std::byte, Utils::AlignedAllocator<std::byte, 32>> pixelBuffer;
         uint32_t bufferWidth = 0;
         uint32_t bufferHeight = 0;
         uint32_t bufferStride = 0;

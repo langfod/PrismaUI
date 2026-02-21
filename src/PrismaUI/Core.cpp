@@ -11,6 +11,7 @@
 #include "ViewManager.h"
 #include "ViewOperationQueue.h"
 #include "ViewRenderer.h"
+#include "WebGL/ANGLEContext.h"
 
 namespace {
     // SEH exception class to convert structured exceptions to C++ exceptions
@@ -245,6 +246,17 @@ namespace PrismaUI::Core {
                 gpuDriver->InitializeD3D(d3dDevice, d3dContext);
                 if (!gpuDriver->IsD3DInitialized()) {
                     logger::error("InitGraphics: GPU driver D3D initialization failed. GPU-accelerated views will not render.");
+                }
+            }
+
+            // Initialize ANGLE EGL display for WebGL support
+            static bool angleInitAttempted = false;
+            if (!angleInitAttempted) {
+                angleInitAttempted = true;
+                if (WebGL::InitializeANGLEDisplay(d3dDevice)) {
+                    logger::info("InitGraphics: ANGLE EGL display initialized for WebGL support.");
+                } else {
+                    logger::warn("InitGraphics: ANGLE initialization failed. WebGL will not be available.");
                 }
             }
         } else {

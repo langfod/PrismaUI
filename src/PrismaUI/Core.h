@@ -40,6 +40,10 @@ namespace PrismaUI::GPU {
     class GPUDriverD3D11;
 }
 
+namespace PrismaUI::WebGL {
+    struct ANGLEContext;
+}
+
 namespace PrismaUI::Listeners {
     class MyLoadListener;
     class MyViewListener;
@@ -69,6 +73,9 @@ namespace PrismaUI::Core {
         std::atomic<bool> inspectorVisible = false;
         std::atomic<bool> needsRecovery = false;  // Flag for recovery after exception
         std::atomic<int> recoveryAttempts = 0;    // Track recovery attempts to prevent loops
+
+        // WebGL support
+        WebGL::ANGLEContext* webglContext = nullptr;  // Non-null if view has an active WebGL canvas
 
         // Inspector rendering data
         // 32-byte aligned buffer for optimal SIMD performance

@@ -5,6 +5,7 @@
 #include "Inspector.h"
 #include "Listeners.h"
 #include "ViewOperationQueue.h"
+#include "WebGL/ANGLEContext.h"
 
 namespace PrismaUI::ViewManager {
     using namespace Core;
@@ -459,6 +460,13 @@ namespace PrismaUI::ViewManager {
         auto ultralightCleanupFuture = ultralightThread.submit([viewId, viewData = viewDataToDestroy]() {
             try {
                 logger::debug("Destroy: Beginning Ultralight resources cleanup for View [{}]", viewId);
+
+                // Clean up WebGL context first (must happen on ultralight thread where it was created)
+                if (viewData->webglContext) {
+                    logger::debug("Destroy: Releasing WebGL context for View [{}]", viewId);
+                    WebGL::DestroyWebGLContext(viewData->webglContext);
+                    viewData->webglContext = nullptr;
+                }
 
                 // Clean up inspector resources first
                 if (viewData->inspectorView) {

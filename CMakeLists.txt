@@ -117,6 +117,13 @@ target_link_libraries(${PROJECT_NAME}
 find_package(cpuinfo CONFIG REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE cpuinfo::cpuinfo)
 
+# Find and link ANGLE for WebGL support (OpenGL ES 2.0 -> D3D11 translation)
+find_package(unofficial-angle CONFIG REQUIRED)
+target_link_libraries(${PROJECT_NAME} PRIVATE
+    unofficial::angle::libEGL
+    unofficial::angle::libGLESv2
+)
+
 # Delay-load Ultralight DLLs so they can be loaded from custom path at runtime
 target_link_options(${PROJECT_NAME}
     PRIVATE

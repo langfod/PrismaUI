@@ -3,6 +3,7 @@
 #include "Core.h"
 #include "GPU/GPUDriverD3D11.h"
 #include "InputHandler.h"
+#include "WebGL/ANGLEContext.h"
 #include "Inspector.h"
 #include "Utils/SIMDDispatch.h"
 
@@ -360,6 +361,17 @@ namespace PrismaUI::ViewRenderer {
 
         spriteBatch->Draw(srv, position, &sourceRect, DirectX::Colors::White, 0.f,
                           DirectX::SimpleMath::Vector2::Zero, 1.0f, DirectX::SpriteEffects_None, 0.f);
+
+        // Draw WebGL canvas overlay if this view has an active WebGL context
+        if (viewData->webglContext && viewData->webglContext->initialized && viewData->webglContext->sharedSRV) {
+            DirectX::SimpleMath::Vector2 webglPos(viewData->webglContext->canvasX, viewData->webglContext->canvasY);
+            RECT webglSourceRect = {0, 0, (long)viewData->webglContext->canvasWidth,
+                                    (long)viewData->webglContext->canvasHeight};
+
+            spriteBatch->Draw(viewData->webglContext->sharedSRV.Get(), webglPos, &webglSourceRect,
+                              DirectX::Colors::White, 0.f, DirectX::SimpleMath::Vector2::Zero, 1.0f,
+                              DirectX::SpriteEffects_None, 0.f);
+        }
 
         // Draw inspector overlay if visible
         if (viewData->inspectorVisible.load() && viewData->inspectorTextureView &&

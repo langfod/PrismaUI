@@ -9,6 +9,8 @@
     {
       "name": "spdlog",
       "features": ["wchar"]
-    }
+    },
+    "angle",
+    "glew"
   ]
 }

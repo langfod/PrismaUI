@@ -2,6 +2,8 @@
 
 #include "Communication.h"
 #include "Core.h"
+#include "WebGL/WebGLBridge.h"
+#include "WebGL/WebGLShim.h"
 
 namespace PrismaUI::Listeners {
     using namespace Core;
@@ -46,10 +48,21 @@ namespace PrismaUI::Listeners {
         });
     }
 
-    void MyLoadListener::OnWindowObjectReady(View* /*caller*/, uint64_t /*frame_id*/, bool is_main_frame,
+    void MyLoadListener::OnWindowObjectReady(View* caller, uint64_t /*frame_id*/, bool is_main_frame,
                                              const String& /*url*/) {
         if (is_main_frame) {
             logger::info("View [{}]: LoadListener: Window object ready.", viewId_);
+
+            // Inject WebGL shim JavaScript before page scripts run
+            const auto& shimJS = WebGL::GetShimJS();
+            if (!shimJS.empty()) {
+                caller->EvaluateScript(String(shimJS.c_str()), nullptr, "");
+            }
+
+            // Bind native WebGL bridge functions
+            auto scoped_context = caller->LockJSContext("");
+            JSContextRef ctx = (*scoped_context);
+            WebGL::InjectWebGLBindings(ctx, viewId_);
         }
     }
 

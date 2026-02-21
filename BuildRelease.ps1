@@ -3,14 +3,14 @@ param(
     [int]$threads = 8
 )
 
-# Load in template default variables
-. .\Build_Config_Template.ps1
-# Load in local variable overides
+$vsDevShellPath = "C:/Program Files/Microsoft Visual Studio/2022/Professional/Common7/Tools/Launch-VsDevShell.ps1"
+
+# Load in local variable overrides
+# local developer copy of Build_Config_Template.ps1 to override $vsDevShellPath or other variables if needed
 if (Test-Path .\Build_Config_Local.ps1) {
     . .\Build_Config_Local.ps1
 }
 
-Write-Host "Running preset $preset"
 
 # Set up Visual Studio x64 environment
 # Override with env var if set
@@ -29,6 +29,7 @@ if (-not (Test-Path $vsDevShellPath)) {
 $currentDirectory = $PWD.Path
 & $vsDevShellPath -Arch amd64; Set-Location -Path "${currentDirectory}"
 
+Write-Host "Running preset $preset"
 
 # Build cmake configure arguments
 $cmakeArgs = @("-S", ".", "--preset=$preset", "-DCMAKE_COMPILE_JOBS=$threads", "-Wno-dev")

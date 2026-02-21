@@ -3,8 +3,15 @@
  */
 #pragma once
 
-#include <REX/W32.h>
-#include <SKSE/SKSE.h>
+#ifndef WIN32_LEAN_AND_MEAN
+    #define WIN32_LEAN_AND_MEAN
+#endif
+
+#ifndef NOMINMAX
+    #define NOMINMAX
+#endif
+
+#include <Windows.h>
 #include <stdint.h>
 
 typedef uint64_t PrismaView;
@@ -12,16 +19,24 @@ typedef uint64_t PrismaView;
 namespace PRISMA_UI_API {
     constexpr const auto PrismaUIPluginName = "PrismaUI";
 
-    using PluginHandle = SKSE::PluginHandle;
-
-    enum class InterfaceVersion : uint8_t { V1 };
+    // Available PrismaUI interface versions
+    enum class InterfaceVersion : uint8_t { V1, V2 };
 
     typedef void (*OnDomReadyCallback)(PrismaView view);
     typedef void (*JSCallback)(const char* result);
     typedef void (*JSListenerCallback)(const char* argument);
 
+    // JavaScript console message severity level for use with RegisterConsoleCallback().
+    enum class ConsoleMessageLevel : uint8_t { Log = 0, Warning, Error, Debug, Info };
+
+    // Console message callback.
+    typedef void (*ConsoleMessageCallback)(PrismaView view, ConsoleMessageLevel level, const char* message);
+
     // PrismaUI modder interface v1
     class IVPrismaUI1 {
+    protected:
+        ~IVPrismaUI1() = default;
+
     public:
         // Create view.
         virtual PrismaView CreateView(const char* htmlPath,
@@ -88,31 +103,63 @@ namespace PRISMA_UI_API {
 
         // Returns true if any view has active focus.
         virtual bool HasAnyActiveFocus() noexcept = 0;
-
-        // Create view with GPU acceleration option.
-        virtual PrismaView CreateViewAccelerated(const char* htmlPath,
-                                                 OnDomReadyCallback onDomReadyCallback = nullptr) noexcept = 0;
     };
 
-    typedef void* (*_RequestPluginAPI)(const InterfaceVersion interfaceVersion);
+    // PrismaUI modder interface v2 (extends v1)
+    class IVPrismaUI2 : public IVPrismaUI1 {
+    protected:
+        ~IVPrismaUI2() = default;
+
+    public:
+        // Register a callback to receive JavaScript console messages from a view.
+        // Pass nullptr to unregister.
+        virtual void RegisterConsoleCallback(PrismaView view, ConsoleMessageCallback callback) noexcept = 0;
+    };
+
+    // Maps interface types to InterfaceVersion enum values.
+    // compile-time constraint -- only request interface versions that actually exist.
+    template <typename T>
+    struct InterfaceVersionMap;
+
+    template <>
+    struct InterfaceVersionMap<IVPrismaUI1> {
+        static constexpr InterfaceVersion version = InterfaceVersion::V1;
+    };
+
+    template <>
+    struct InterfaceVersionMap<IVPrismaUI2> {
+        static constexpr InterfaceVersion version = InterfaceVersion::V2;
+    };
+
+    typedef void* (*RequestPluginAPIFunc)(InterfaceVersion interfaceVersion);
 
     /// Request the PrismaUI API interface.
     /// Recommended: Send your request during or after SKSEMessagingInterface::kMessage_PostLoad to make sure the dll
     /// has already been loaded
-
-    [[nodiscard]] inline void* RequestPluginAPI(const InterfaceVersion a_interfaceVersion = InterfaceVersion::V1) {
-        auto pluginHandle = REX::W32::GetModuleHandleW(L"PrismaUI.dll");
+    [[nodiscard]] inline void* RequestPluginAPI(InterfaceVersion a_interfaceVersion = InterfaceVersion::V1) {
+        auto pluginHandle = GetModuleHandle(L"PrismaUI.dll");
         if (!pluginHandle) {
             return nullptr;
         }
 
-        _RequestPluginAPI requestAPIFunction =
-            reinterpret_cast<_RequestPluginAPI>(REX::W32::GetProcAddress(pluginHandle, "RequestPluginAPI"));
+        auto requestAPIFunction =
+            reinterpret_cast<RequestPluginAPIFunc>(GetProcAddress(pluginHandle, "RequestPluginAPI"));
 
         if (requestAPIFunction) {
             return requestAPIFunction(a_interfaceVersion);
         }
 
         return nullptr;
+    }
+
+    /// Request a specific PrismaUI API interface version.
+    /// Returns nullptr if the loaded PrismaUI DLL does not support the requested version.
+    ///
+    /// Usage:
+    ///   auto* m_prismaUI   = PRISMA_UI_API::RequestPluginAPI<PRISMA_UI_API::IVPrismaUI1>();
+    ///   auto* m_prismaUIv2 = PRISMA_UI_API::RequestPluginAPI<PRISMA_UI_API::IVPrismaUI2>();
+    template <typename T>
+    [[nodiscard]] inline T* RequestPluginAPI() {
+        return static_cast<T*>(RequestPluginAPI(InterfaceVersionMap<T>::version));
     }
 }

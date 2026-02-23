@@ -4,7 +4,7 @@
 
 class PluginAPI
 {
-	using LatestInterface = PRISMA_UI_API::IVPrismaUI2;
+	using LatestInterface = PRISMA_UI_API::IVPrismaUI3;
 
 public:
 	class PrismaUIInterface : public LatestInterface

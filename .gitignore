@@ -18,4 +18,3 @@ compile_commands.json
 /dist/
 external/ultralight-free-sdk-1.4.1-dev-win-x64.7z
 Build_Config_Local.ps1
-/external/glew-2.3.1

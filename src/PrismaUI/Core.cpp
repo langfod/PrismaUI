@@ -12,6 +12,7 @@
 #include "ViewOperationQueue.h"
 #include "ViewRenderer.h"
 #include "WebGL/ANGLEContext.h"
+#include "WebGL/WebGLBridge.h"
 
 namespace {
     // SEH exception class to convert structured exceptions to C++ exceptions
@@ -389,7 +390,7 @@ namespace PrismaUI::Core {
                 for (auto& viewData : viewsToInitialize) {
                     if (!viewData || viewData->ultralightView) continue;
 
-                    logger::info("UI Thread: Creating View [{}] for path: {}", viewData->id, viewData->htmlPathToLoad);
+                    logger::info("UI Thread: Creating {} View [{}] for path: {}", viewData->isAccelerated ? "GPU" : "CPU", viewData->id, viewData->htmlPathToLoad);
 
                     if (screenSize.width == 0 || screenSize.height == 0) {
                         logger::error("UI Thread: Cannot create View [{}], screen size is zero.", viewData->id);
@@ -430,8 +431,18 @@ namespace PrismaUI::Core {
 
                 ProcessEvents();
 
+                // Reset per-frame WebGL state so the first GL call re-syncs
+                // ANGLE's D3D11 state after Ultralight may have changed it.
+                WebGL::ResetFrameState();
+
                 if (localRenderer) {
                     localRenderer->Update();
+
+                    // Restore D3D11 render targets after WebGL/ANGLE may have
+                    // changed them during Update().  Must happen before Render()
+                    // which needs Ultralight's GPU driver state intact.
+                    WebGL::EndFrameGLState();
+
                     localRenderer->RefreshDisplay(0);
                     localRenderer->Render();
                 }

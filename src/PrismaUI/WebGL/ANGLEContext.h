@@ -16,7 +16,8 @@ namespace PrismaUI::WebGL {
         EGLSurface eglSurface = EGL_NO_SURFACE;
         EGLConfig eglConfig = nullptr;
 
-        // Shared D3D11 texture: ANGLE renders to this, render thread composites from it
+        // Shared D3D11 texture on Skyrim's device: ReadbackToSharedTexture copies
+        // ANGLE's output here; the render thread composites from it via SpriteBatch.
         Microsoft::WRL::ComPtr<ID3D11Texture2D> sharedTexture;
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> sharedSRV;
 
@@ -27,14 +28,21 @@ namespace PrismaUI::WebGL {
         float canvasX = 0.0f;
         float canvasY = 0.0f;
 
+        // Whether the canvas should be drawn (computed by JS shim)
+        bool visible = true;
+
+        // Last update tick from JS (ms since steady_clock epoch)
+        uint64_t lastUpdateMs = 0;
+
         bool initialized = false;
     };
 
-    // Initialize the global ANGLE EGL display using Skyrim's D3D11 device.
+    // Initialize the global ANGLE EGL display with its own D3D11 device.
+    // The device parameter is used only for creating the shared compositing texture.
     // Call once after d3dDevice is available.
     bool InitializeANGLEDisplay(ID3D11Device* device);
 
-    // Create a per-canvas ANGLE context with a D3D11-backed pbuffer surface.
+    // Create a per-canvas ANGLE context with a pbuffer surface.
     ANGLEContext* CreateWebGLContext(uint32_t width, uint32_t height, ID3D11Device* device);
 
     // Resize the ANGLE surface (recreates pbuffer + shared texture).

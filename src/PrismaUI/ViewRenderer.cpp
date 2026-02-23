@@ -6,6 +6,7 @@
 #include "WebGL/ANGLEContext.h"
 #include "Inspector.h"
 #include "Utils/SIMDDispatch.h"
+#include <chrono>
 
 namespace PrismaUI::ViewRenderer {
     using namespace Core;
@@ -318,6 +319,17 @@ namespace PrismaUI::ViewRenderer {
 
             spriteBatch->End();
 
+            // Second pass: draw WebGL overlays with straight (non-premultiplied) alpha
+            // blending. ANGLE/WebGL outputs straight alpha, which requires different
+            // blend factors than Ultralight's premultiplied alpha output.
+            spriteBatch->Begin(DirectX::SpriteSortMode_Deferred, commonStates->NonPremultiplied());
+
+            for (const auto& viewData : viewsToDraw) {
+                DrawWebGLOverlay(viewData);
+            }
+
+            spriteBatch->End();
+
             d3dContext->OMSetBlendState(backupBlendState, backupBlendFactor, backupSampleMask);
             d3dContext->OMSetDepthStencilState(backupDepthStencilState, backupStencilRef);
             d3dContext->RSSetState(backupRasterizerState);
@@ -362,17 +374,6 @@ namespace PrismaUI::ViewRenderer {
         spriteBatch->Draw(srv, position, &sourceRect, DirectX::Colors::White, 0.f,
                           DirectX::SimpleMath::Vector2::Zero, 1.0f, DirectX::SpriteEffects_None, 0.f);
 
-        // Draw WebGL canvas overlay if this view has an active WebGL context
-        if (viewData->webglContext && viewData->webglContext->initialized && viewData->webglContext->sharedSRV) {
-            DirectX::SimpleMath::Vector2 webglPos(viewData->webglContext->canvasX, viewData->webglContext->canvasY);
-            RECT webglSourceRect = {0, 0, (long)viewData->webglContext->canvasWidth,
-                                    (long)viewData->webglContext->canvasHeight};
-
-            spriteBatch->Draw(viewData->webglContext->sharedSRV.Get(), webglPos, &webglSourceRect,
-                              DirectX::Colors::White, 0.f, DirectX::SimpleMath::Vector2::Zero, 1.0f,
-                              DirectX::SpriteEffects_None, 0.f);
-        }
-
         // Draw inspector overlay if visible
         if (viewData->inspectorVisible.load() && viewData->inspectorTextureView &&
             viewData->inspectorTextureWidth > 0 && viewData->inspectorTextureHeight > 0) {
@@ -385,5 +386,28 @@ namespace PrismaUI::ViewRenderer {
                               DirectX::Colors::White, 0.f, DirectX::SimpleMath::Vector2::Zero, 1.0f,
                               DirectX::SpriteEffects_None, 0.f);
         }
+    }
+
+    void DrawWebGLOverlay(std::shared_ptr<Core::PrismaView> viewData) {
+        if (!viewData) return;
+        if (!viewData->webglContext || !viewData->webglContext->initialized || !viewData->webglContext->sharedSRV)
+            return;
+
+        auto* webgl = viewData->webglContext;
+        if (!webgl->visible) return;
+
+        uint64_t nowMs = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count());
+        if (webgl->lastUpdateMs != 0 && nowMs - webgl->lastUpdateMs > 1500) return;
+        if (webgl->canvasWidth == 0 || webgl->canvasHeight == 0) return;
+
+        DirectX::SimpleMath::Vector2 webglPos(webgl->canvasX, webgl->canvasY);
+        RECT webglSourceRect = {0, 0, (long)webgl->canvasWidth, (long)webgl->canvasHeight};
+
+        spriteBatch->Draw(webgl->sharedSRV.Get(), webglPos, &webglSourceRect,
+                          DirectX::Colors::White, 0.f, DirectX::SimpleMath::Vector2::Zero, 1.0f,
+                          DirectX::SpriteEffects_None, 0.f);
     }
 }

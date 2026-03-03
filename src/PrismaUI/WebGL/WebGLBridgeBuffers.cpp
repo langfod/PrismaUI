@@ -87,4 +87,43 @@ namespace PrismaUI::WebGL {
         return JSValueMakeUndefined(ctx);
     }
 
+    // =========================================================================
+    // Buffer Operations (WebGL2)
+    // =========================================================================
+
+    JSValueRef GL_copyBufferSubData(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                     size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 5) return JSValueMakeUndefined(ctx);
+        glCopyBufferSubData(
+            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+            static_cast<GLenum>(JSValueToNumber(ctx, argv[1], nullptr)),
+            static_cast<GLintptr>(JSValueToNumber(ctx, argv[2], nullptr)),
+            static_cast<GLintptr>(JSValueToNumber(ctx, argv[3], nullptr)),
+            static_cast<GLsizeiptr>(JSValueToNumber(ctx, argv[4], nullptr)));
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_getBufferSubData(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                    size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 3) return JSValueMakeUndefined(ctx);
+        GLenum target = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
+        GLintptr srcByteOffset = static_cast<GLintptr>(JSValueToNumber(ctx, argv[1], nullptr));
+
+        if (!JSValueIsObject(ctx, argv[2])) return JSValueMakeUndefined(ctx);
+        JSObjectRef dstData = JSValueToObject(ctx, argv[2], nullptr);
+        size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, dstData, nullptr);
+        void* dstPtr = JSObjectGetTypedArrayBytesPtr(ctx, dstData, nullptr);
+        if (!dstPtr || byteLen == 0) return JSValueMakeUndefined(ctx);
+
+        // GLES3 doesn't have glGetBufferSubData. Emulate with glMapBufferRange.
+        void* mapped = glMapBufferRange(target, srcByteOffset, static_cast<GLsizeiptr>(byteLen), GL_MAP_READ_BIT);
+        if (mapped) {
+            std::memcpy(dstPtr, mapped, byteLen);
+            glUnmapBuffer(target);
+        }
+        return JSValueMakeUndefined(ctx);
+    }
+
 }  // namespace PrismaUI::WebGL

@@ -117,7 +117,7 @@ target_link_libraries(${PROJECT_NAME}
 find_package(cpuinfo CONFIG REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE cpuinfo::cpuinfo)
 
-# Find and link ANGLE for WebGL support (OpenGL ES 2.0 -> D3D11 translation)
+# Find and link ANGLE for WebGL support (OpenGL ES 3.0 -> D3D11 translation)
 find_package(unofficial-angle CONFIG REQUIRED)
 target_link_libraries(${PROJECT_NAME} PRIVATE
     unofficial::angle::libEGL

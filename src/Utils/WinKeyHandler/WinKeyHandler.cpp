@@ -160,25 +160,12 @@ namespace WinKeyHandler {
 	}
 
 	ultralight::KeyEvent CreateKeyEvent(ultralight::KeyEvent::Type type, WPARAM wParam, LPARAM lParam) {
-		ultralight::KeyEvent ev;
-		ev.type = type;
-		GetUltralightModifiers(ev);
-
-		ev.virtual_key_code = WinKeyToUltralightKey(static_cast<UINT>(wParam));
-
-		ev.key_identifier = ultralight::String(GetUltralightKeyIdentifier(ev.virtual_key_code).c_str());
-
-		ev.text = "";
-		ev.unmodified_text = "";
-
-		// Keypad keys are VK_NUMPAD0-VK_DIVIDE. KF_EXTENDED is set for non-keypad
-		// extended keys (navigation cluster, right Ctrl/Alt), so don't use it here.
-		ev.is_keypad = (wParam >= VK_NUMPAD0 && wParam <= VK_DIVIDE);
-		ev.is_auto_repeat = (HIWORD(lParam) & KF_REPEAT) == KF_REPEAT;
-		ev.is_system_key = (ev.modifiers & ultralight::KeyEvent::kMod_AltKey) &&
+		bool is_system_key = (GetKeyState(VK_MENU) < 0) &&
 			(wParam == VK_TAB || wParam == VK_ESCAPE || wParam == VK_RETURN || wParam == VK_SPACE ||
 				(wParam >= VK_F1 && wParam <= VK_F24));
 
+		ultralight::KeyEvent ev(type, (uintptr_t)wParam, (intptr_t)lParam, is_system_key);
+		ev.native_key_code = static_cast<int>((lParam >> 16) & 0x1FF);
 		return ev;
 	}
 }

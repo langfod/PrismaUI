@@ -797,8 +797,24 @@ namespace PrismaUI::InputHandler {
                                 // Route keyboard events to inspector if it's visible and focused
                                 if (inspectorView && targetViewData->inspectorVisible.load() &&
                                     inspectorView->HasFocus()) {
+                                    if (arg.type == ultralight::KeyEvent::kType_RawKeyDown ||
+                                        arg.type == ultralight::KeyEvent::kType_KeyUp) {
+                                        auto script = "window.__prismaKeyInfo={vk:" +
+                                            std::to_string(arg.virtual_key_code) + ",mods:" +
+                                            std::to_string(arg.modifiers) + "}";
+                                        inspectorView->EvaluateScript(
+                                            ultralight::String(script.c_str()), nullptr, "");
+                                    }
                                     inspectorView->FireKeyEvent(arg);
                                 } else {
+                                    if (arg.type == ultralight::KeyEvent::kType_RawKeyDown ||
+                                        arg.type == ultralight::KeyEvent::kType_KeyUp) {
+                                        auto script = "window.__prismaKeyInfo={vk:" +
+                                            std::to_string(arg.virtual_key_code) + ",mods:" +
+                                            std::to_string(arg.modifiers) + "}";
+                                        ulView->EvaluateScript(
+                                            ultralight::String(script.c_str()), nullptr, "");
+                                    }
                                     ulView->FireKeyEvent(arg);
                                 }
                             }

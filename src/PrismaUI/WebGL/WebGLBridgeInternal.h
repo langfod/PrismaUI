@@ -6,7 +6,7 @@
 #include "ANGLEContext.h"
 
 #include <EGL/egl.h>
-#include <GLES2/gl2.h>
+#include <GLES3/gl3.h>
 #include <JavaScriptCore/JavaScript.h>
 
 #include <cstring>
@@ -28,6 +28,15 @@ namespace PrismaUI::WebGL {
     JSValueRef MakeGLObject(JSContextRef ctx, const char* className, GLuint id);
     std::string GetString(JSContextRef ctx, JSValueRef val);
     void ReadbackToSharedTexture(ANGLEContext* c);
+
+    // Helper to extract a float/int/uint array from either a TypedArray or a plain JS Array.
+    // Returns the count of elements extracted.  Writes into 'out' up to 'maxCount' elements.
+    // If the source is a TypedArray, sets *directPtr to the raw pointer and returns the
+    // element count (caller can use the pointer directly without copying).
+    // If the source is a plain Array, copies values into 'out' and sets *directPtr = nullptr.
+    template <typename T>
+    size_t ExtractNumericArray(JSContextRef ctx, JSValueRef val,
+                               T* out, size_t maxCount, const T** directPtr);
 
     // =========================================================================
     // GL callback type alias (matches JSObjectCallAsFunctionCallback)
@@ -148,6 +157,22 @@ namespace PrismaUI::WebGL {
     JSValueRef GL_uniformMatrix2fv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
     JSValueRef GL_uniformMatrix3fv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
     JSValueRef GL_uniformMatrix4fv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    // WebGL2: Uint uniforms
+    JSValueRef GL_uniform1ui(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_uniform2ui(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_uniform3ui(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_uniform4ui(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_uniform1uiv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_uniform2uiv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_uniform3uiv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_uniform4uiv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    // WebGL2: Non-square matrix uniforms
+    JSValueRef GL_uniformMatrix2x3fv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_uniformMatrix3x2fv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_uniformMatrix2x4fv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_uniformMatrix4x2fv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_uniformMatrix3x4fv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_uniformMatrix4x3fv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
 
     // =========================================================================
     // Textures
@@ -164,6 +189,12 @@ namespace PrismaUI::WebGL {
     JSValueRef GL_copyTexImage2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
     JSValueRef GL_copyTexSubImage2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
     JSValueRef GL_readPixels(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    // WebGL2: 3D Textures & Storage
+    JSValueRef GL_texStorage2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_texStorage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_texImage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_texSubImage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_copyTexSubImage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
 
     // =========================================================================
     // Framebuffers
@@ -188,6 +219,55 @@ namespace PrismaUI::WebGL {
     // =========================================================================
     JSValueRef GL_drawArrays(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
     JSValueRef GL_drawElements(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_drawArraysInstanced(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_drawElementsInstanced(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_drawRangeElements(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_vertexAttribDivisor(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+
+    // =========================================================================
+    // Vertex Array Objects (WebGL2)
+    // =========================================================================
+    JSValueRef GL_createVertexArray(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t, const JSValueRef[], JSValueRef*);
+    JSValueRef GL_deleteVertexArray(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_bindVertexArray(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_isVertexArray(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+
+    // =========================================================================
+    // Uniform Buffer Objects (WebGL2)
+    // =========================================================================
+    JSValueRef GL_bindBufferBase(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_bindBufferRange(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_uniformBlockBinding(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_getUniformBlockIndex(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_getActiveUniformBlockName(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_getActiveUniformBlockParameter(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_getUniformIndices(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_getActiveUniforms(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+
+    // =========================================================================
+    // Transform Feedback (WebGL2)
+    // =========================================================================
+    JSValueRef GL_createTransformFeedback(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t, const JSValueRef[], JSValueRef*);
+    JSValueRef GL_deleteTransformFeedback(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_bindTransformFeedback(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_isTransformFeedback(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_beginTransformFeedback(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_endTransformFeedback(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t, const JSValueRef[], JSValueRef*);
+    JSValueRef GL_pauseTransformFeedback(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t, const JSValueRef[], JSValueRef*);
+    JSValueRef GL_resumeTransformFeedback(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t, const JSValueRef[], JSValueRef*);
+    JSValueRef GL_transformFeedbackVaryings(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_getTransformFeedbackVarying(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+
+    // =========================================================================
+    // Framebuffer Enhancements (WebGL2)
+    // =========================================================================
+    JSValueRef GL_drawBuffers(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_readBuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_blitFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_framebufferTextureLayer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_renderbufferStorageMultisample(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_invalidateFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_invalidateSubFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
 
     // =========================================================================
     // Query / Introspection
@@ -228,5 +308,45 @@ namespace PrismaUI::WebGL {
     JSValueRef GL_vertexAttrib2fv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
     JSValueRef GL_vertexAttrib3fv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
     JSValueRef GL_vertexAttrib4fv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    // WebGL2: Integer vertex attribs
+    JSValueRef GL_vertexAttribIPointer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_vertexAttribI4i(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_vertexAttribI4ui(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_vertexAttribI4iv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_vertexAttribI4uiv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    // WebGL2: Clear Buffer
+    JSValueRef GL_clearBufferiv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_clearBufferuiv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_clearBufferfv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_clearBufferfi(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    // WebGL2: Samplers
+    JSValueRef GL_createSampler(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t, const JSValueRef[], JSValueRef*);
+    JSValueRef GL_deleteSampler(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_bindSampler(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_isSampler(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_samplerParameteri(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_samplerParameterf(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_getSamplerParameter(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    // WebGL2: Queries
+    JSValueRef GL_createQuery(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t, const JSValueRef[], JSValueRef*);
+    JSValueRef GL_deleteQuery(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_isQuery(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_beginQuery(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_endQuery(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_getQuery(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_getQueryParameter(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    // WebGL2: Sync
+    JSValueRef GL_fenceSync(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_isSync(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_deleteSync(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_clientWaitSync(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_waitSync(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_getSyncParameter(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    // WebGL2: Buffer Operations
+    JSValueRef GL_copyBufferSubData(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_getBufferSubData(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    // WebGL2: Misc Queries
+    JSValueRef GL_getFragDataLocation(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
+    JSValueRef GL_getIndexedParameter(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc, const JSValueRef argv[], JSValueRef*);
 
 }  // namespace PrismaUI::WebGL

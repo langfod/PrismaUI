@@ -3,6 +3,54 @@
 namespace PrismaUI::WebGL {
 
     // =========================================================================
+    // Helper: extract numeric array from TypedArray or plain JS Array
+    // =========================================================================
+
+    template <typename T>
+    size_t ExtractNumericArray(JSContextRef ctx, JSValueRef val,
+                               T* out, size_t maxCount, const T** directPtr) {
+        *directPtr = nullptr;
+        if (!JSValueIsObject(ctx, val)) return 0;
+        JSObjectRef obj = JSValueToObject(ctx, val, nullptr);
+        if (!obj) return 0;
+
+        // Try TypedArray fast path first
+        JSTypedArrayType arrType = JSValueGetTypedArrayType(ctx, val, nullptr);
+        if (arrType != kJSTypedArrayTypeNone) {
+            size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, obj, nullptr);
+            auto* ptr = static_cast<const T*>(JSObjectGetTypedArrayBytesPtr(ctx, obj, nullptr));
+            if (ptr && byteLen > 0) {
+                *directPtr = ptr;
+                return byteLen / sizeof(T);
+            }
+            return 0;
+        }
+
+        // Slow path: plain JS Array (or array-like object with .length)
+        JSStringRef lengthKey = JSStringCreateWithUTF8CString("length");
+        JSValueRef lengthVal = JSObjectGetProperty(ctx, obj, lengthKey, nullptr);
+        JSStringRelease(lengthKey);
+        if (JSValueIsUndefined(ctx, lengthVal)) return 0;
+
+        size_t count = static_cast<size_t>(JSValueToNumber(ctx, lengthVal, nullptr));
+        if (count > maxCount) count = maxCount;
+        for (size_t i = 0; i < count; i++) {
+            JSValueRef elem = JSObjectGetPropertyAtIndex(ctx, obj, static_cast<unsigned>(i), nullptr);
+            out[i] = static_cast<T>(JSValueToNumber(ctx, elem, nullptr));
+        }
+        return count;
+    }
+
+    // Explicit instantiations
+    template size_t ExtractNumericArray<GLfloat>(JSContextRef, JSValueRef, GLfloat*, size_t, const GLfloat**);
+    template size_t ExtractNumericArray<GLint>(JSContextRef, JSValueRef, GLint*, size_t, const GLint**);
+    template size_t ExtractNumericArray<GLuint>(JSContextRef, JSValueRef, GLuint*, size_t, const GLuint**);
+
+    // Max elements for stack-allocated temp buffers (covers uniformMatrix4fv with up to 16 matrices)
+    static constexpr size_t kMaxTempFloats = 256;
+    static constexpr size_t kMaxTempInts = 256;
+
+    // =========================================================================
     // Uniforms
     // =========================================================================
 
@@ -106,20 +154,15 @@ namespace PrismaUI::WebGL {
         return JSValueMakeUndefined(ctx);
     }
 
-    // uniformNfv/iv functions — accept typed arrays
+    // uniformNfv/iv functions — accept typed arrays or plain JS Arrays
     JSValueRef GL_uniform1fv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
                              size_t argc, const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
         GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
-        if (JSValueIsObject(ctx, argv[1])) {
-            JSObjectRef arr = JSValueToObject(ctx, argv[1], nullptr);
-            size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, arr, nullptr);
-            auto* ptr = static_cast<const GLfloat*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
-            if (ptr && byteLen > 0) {
-                glUniform1fv(loc, static_cast<GLsizei>(byteLen / sizeof(GLfloat)), ptr);
-            }
-        }
+        GLfloat tmp[kMaxTempFloats]; const GLfloat* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, kMaxTempFloats, &ptr);
+        if (n > 0) glUniform1fv(loc, static_cast<GLsizei>(n), ptr ? ptr : tmp);
         return JSValueMakeUndefined(ctx);
     }
 
@@ -128,14 +171,9 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
         GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
-        if (JSValueIsObject(ctx, argv[1])) {
-            JSObjectRef arr = JSValueToObject(ctx, argv[1], nullptr);
-            size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, arr, nullptr);
-            auto* ptr = static_cast<const GLfloat*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
-            if (ptr && byteLen > 0) {
-                glUniform2fv(loc, static_cast<GLsizei>(byteLen / (2 * sizeof(GLfloat))), ptr);
-            }
-        }
+        GLfloat tmp[kMaxTempFloats]; const GLfloat* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, kMaxTempFloats, &ptr);
+        if (n >= 2) glUniform2fv(loc, static_cast<GLsizei>(n / 2), ptr ? ptr : tmp);
         return JSValueMakeUndefined(ctx);
     }
 
@@ -144,14 +182,9 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
         GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
-        if (JSValueIsObject(ctx, argv[1])) {
-            JSObjectRef arr = JSValueToObject(ctx, argv[1], nullptr);
-            size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, arr, nullptr);
-            auto* ptr = static_cast<const GLfloat*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
-            if (ptr && byteLen > 0) {
-                glUniform3fv(loc, static_cast<GLsizei>(byteLen / (3 * sizeof(GLfloat))), ptr);
-            }
-        }
+        GLfloat tmp[kMaxTempFloats]; const GLfloat* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, kMaxTempFloats, &ptr);
+        if (n >= 3) glUniform3fv(loc, static_cast<GLsizei>(n / 3), ptr ? ptr : tmp);
         return JSValueMakeUndefined(ctx);
     }
 
@@ -160,14 +193,9 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
         GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
-        if (JSValueIsObject(ctx, argv[1])) {
-            JSObjectRef arr = JSValueToObject(ctx, argv[1], nullptr);
-            size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, arr, nullptr);
-            auto* ptr = static_cast<const GLfloat*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
-            if (ptr && byteLen > 0) {
-                glUniform4fv(loc, static_cast<GLsizei>(byteLen / (4 * sizeof(GLfloat))), ptr);
-            }
-        }
+        GLfloat tmp[kMaxTempFloats]; const GLfloat* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, kMaxTempFloats, &ptr);
+        if (n >= 4) glUniform4fv(loc, static_cast<GLsizei>(n / 4), ptr ? ptr : tmp);
         return JSValueMakeUndefined(ctx);
     }
 
@@ -176,14 +204,9 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
         GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
-        if (JSValueIsObject(ctx, argv[1])) {
-            JSObjectRef arr = JSValueToObject(ctx, argv[1], nullptr);
-            size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, arr, nullptr);
-            auto* ptr = static_cast<const GLint*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
-            if (ptr && byteLen > 0) {
-                glUniform1iv(loc, static_cast<GLsizei>(byteLen / sizeof(GLint)), ptr);
-            }
-        }
+        GLint tmp[kMaxTempInts]; const GLint* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, kMaxTempInts, &ptr);
+        if (n > 0) glUniform1iv(loc, static_cast<GLsizei>(n), ptr ? ptr : tmp);
         return JSValueMakeUndefined(ctx);
     }
 
@@ -192,14 +215,9 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
         GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
-        if (JSValueIsObject(ctx, argv[1])) {
-            JSObjectRef arr = JSValueToObject(ctx, argv[1], nullptr);
-            size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, arr, nullptr);
-            auto* ptr = static_cast<const GLint*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
-            if (ptr && byteLen > 0) {
-                glUniform2iv(loc, static_cast<GLsizei>(byteLen / (2 * sizeof(GLint))), ptr);
-            }
-        }
+        GLint tmp[kMaxTempInts]; const GLint* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, kMaxTempInts, &ptr);
+        if (n >= 2) glUniform2iv(loc, static_cast<GLsizei>(n / 2), ptr ? ptr : tmp);
         return JSValueMakeUndefined(ctx);
     }
 
@@ -208,14 +226,9 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
         GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
-        if (JSValueIsObject(ctx, argv[1])) {
-            JSObjectRef arr = JSValueToObject(ctx, argv[1], nullptr);
-            size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, arr, nullptr);
-            auto* ptr = static_cast<const GLint*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
-            if (ptr && byteLen > 0) {
-                glUniform3iv(loc, static_cast<GLsizei>(byteLen / (3 * sizeof(GLint))), ptr);
-            }
-        }
+        GLint tmp[kMaxTempInts]; const GLint* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, kMaxTempInts, &ptr);
+        if (n >= 3) glUniform3iv(loc, static_cast<GLsizei>(n / 3), ptr ? ptr : tmp);
         return JSValueMakeUndefined(ctx);
     }
 
@@ -224,14 +237,9 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
         GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
-        if (JSValueIsObject(ctx, argv[1])) {
-            JSObjectRef arr = JSValueToObject(ctx, argv[1], nullptr);
-            size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, arr, nullptr);
-            auto* ptr = static_cast<const GLint*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
-            if (ptr && byteLen > 0) {
-                glUniform4iv(loc, static_cast<GLsizei>(byteLen / (4 * sizeof(GLint))), ptr);
-            }
-        }
+        GLint tmp[kMaxTempInts]; const GLint* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, kMaxTempInts, &ptr);
+        if (n >= 4) glUniform4iv(loc, static_cast<GLsizei>(n / 4), ptr ? ptr : tmp);
         return JSValueMakeUndefined(ctx);
     }
 
@@ -242,14 +250,9 @@ namespace PrismaUI::WebGL {
         if (!c || !c->initialized || argc < 3) return JSValueMakeUndefined(ctx);
         GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
         GLboolean transpose = JSValueToBoolean(ctx, argv[1]);
-        if (JSValueIsObject(ctx, argv[2])) {
-            JSObjectRef arr = JSValueToObject(ctx, argv[2], nullptr);
-            size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, arr, nullptr);
-            auto* ptr = static_cast<const GLfloat*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
-            if (ptr && byteLen > 0) {
-                glUniformMatrix2fv(loc, static_cast<GLsizei>(byteLen / (4 * sizeof(GLfloat))), transpose, ptr);
-            }
-        }
+        GLfloat tmp[kMaxTempFloats]; const GLfloat* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[2], tmp, kMaxTempFloats, &ptr);
+        if (n >= 4) glUniformMatrix2fv(loc, static_cast<GLsizei>(n / 4), transpose, ptr ? ptr : tmp);
         return JSValueMakeUndefined(ctx);
     }
 
@@ -259,14 +262,9 @@ namespace PrismaUI::WebGL {
         if (!c || !c->initialized || argc < 3) return JSValueMakeUndefined(ctx);
         GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
         GLboolean transpose = JSValueToBoolean(ctx, argv[1]);
-        if (JSValueIsObject(ctx, argv[2])) {
-            JSObjectRef arr = JSValueToObject(ctx, argv[2], nullptr);
-            size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, arr, nullptr);
-            auto* ptr = static_cast<const GLfloat*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
-            if (ptr && byteLen > 0) {
-                glUniformMatrix3fv(loc, static_cast<GLsizei>(byteLen / (9 * sizeof(GLfloat))), transpose, ptr);
-            }
-        }
+        GLfloat tmp[kMaxTempFloats]; const GLfloat* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[2], tmp, kMaxTempFloats, &ptr);
+        if (n >= 9) glUniformMatrix3fv(loc, static_cast<GLsizei>(n / 9), transpose, ptr ? ptr : tmp);
         return JSValueMakeUndefined(ctx);
     }
 
@@ -276,15 +274,9 @@ namespace PrismaUI::WebGL {
         if (!c || !c->initialized || argc < 3) return JSValueMakeUndefined(ctx);
         GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
         GLboolean transpose = JSValueToBoolean(ctx, argv[1]);
-        if (JSValueIsObject(ctx, argv[2])) {
-            JSObjectRef arr = JSValueToObject(ctx, argv[2], nullptr);
-            size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, arr, nullptr);
-            auto* ptr = static_cast<const GLfloat*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
-            if (ptr && byteLen > 0) {
-                GLsizei count = static_cast<GLsizei>(byteLen / (16 * sizeof(GLfloat)));
-                glUniformMatrix4fv(loc, count, transpose, ptr);
-            }
-        }
+        GLfloat tmp[kMaxTempFloats]; const GLfloat* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[2], tmp, kMaxTempFloats, &ptr);
+        if (n >= 16) glUniformMatrix4fv(loc, static_cast<GLsizei>(n / 16), transpose, ptr ? ptr : tmp);
         return JSValueMakeUndefined(ctx);
     }
 
@@ -343,11 +335,9 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
         GLuint index = static_cast<GLuint>(JSValueToNumber(ctx, argv[0], nullptr));
-        if (JSValueIsObject(ctx, argv[1])) {
-            JSObjectRef arr = JSValueToObject(ctx, argv[1], nullptr);
-            auto* ptr = static_cast<const GLfloat*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
-            if (ptr) glVertexAttrib1fv(index, ptr);
-        }
+        GLfloat tmp[4]; const GLfloat* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, 4, &ptr);
+        if (n >= 1) glVertexAttrib1fv(index, ptr ? ptr : tmp);
         return JSValueMakeUndefined(ctx);
     }
 
@@ -356,11 +346,9 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
         GLuint index = static_cast<GLuint>(JSValueToNumber(ctx, argv[0], nullptr));
-        if (JSValueIsObject(ctx, argv[1])) {
-            JSObjectRef arr = JSValueToObject(ctx, argv[1], nullptr);
-            auto* ptr = static_cast<const GLfloat*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
-            if (ptr) glVertexAttrib2fv(index, ptr);
-        }
+        GLfloat tmp[4]; const GLfloat* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, 4, &ptr);
+        if (n >= 2) glVertexAttrib2fv(index, ptr ? ptr : tmp);
         return JSValueMakeUndefined(ctx);
     }
 
@@ -369,11 +357,9 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
         GLuint index = static_cast<GLuint>(JSValueToNumber(ctx, argv[0], nullptr));
-        if (JSValueIsObject(ctx, argv[1])) {
-            JSObjectRef arr = JSValueToObject(ctx, argv[1], nullptr);
-            auto* ptr = static_cast<const GLfloat*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
-            if (ptr) glVertexAttrib3fv(index, ptr);
-        }
+        GLfloat tmp[4]; const GLfloat* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, 4, &ptr);
+        if (n >= 3) glVertexAttrib3fv(index, ptr ? ptr : tmp);
         return JSValueMakeUndefined(ctx);
     }
 
@@ -382,11 +368,194 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
         GLuint index = static_cast<GLuint>(JSValueToNumber(ctx, argv[0], nullptr));
-        if (JSValueIsObject(ctx, argv[1])) {
-            JSObjectRef arr = JSValueToObject(ctx, argv[1], nullptr);
-            auto* ptr = static_cast<const GLfloat*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
-            if (ptr) glVertexAttrib4fv(index, ptr);
+        GLfloat tmp[4]; const GLfloat* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, 4, &ptr);
+        if (n >= 4) glVertexAttrib4fv(index, ptr ? ptr : tmp);
+        return JSValueMakeUndefined(ctx);
+    }
+
+    // =========================================================================
+    // Uint Uniforms (WebGL2)
+    // =========================================================================
+
+    JSValueRef GL_uniform1ui(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                              size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
+        GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
+        glUniform1ui(loc, static_cast<GLuint>(JSValueToNumber(ctx, argv[1], nullptr)));
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_uniform2ui(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                              size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 3) return JSValueMakeUndefined(ctx);
+        GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
+        glUniform2ui(loc,
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[1], nullptr)),
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[2], nullptr)));
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_uniform3ui(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                              size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 4) return JSValueMakeUndefined(ctx);
+        GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
+        glUniform3ui(loc,
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[1], nullptr)),
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[2], nullptr)),
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[3], nullptr)));
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_uniform4ui(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                              size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 5) return JSValueMakeUndefined(ctx);
+        GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
+        glUniform4ui(loc,
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[1], nullptr)),
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[2], nullptr)),
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[3], nullptr)),
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[4], nullptr)));
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_uniform1uiv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                               size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
+        GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
+        GLuint tmp[kMaxTempInts]; const GLuint* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, kMaxTempInts, &ptr);
+        if (n > 0) glUniform1uiv(loc, static_cast<GLsizei>(n), ptr ? ptr : tmp);
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_uniform2uiv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                               size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
+        GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
+        GLuint tmp[kMaxTempInts]; const GLuint* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, kMaxTempInts, &ptr);
+        if (n >= 2) glUniform2uiv(loc, static_cast<GLsizei>(n / 2), ptr ? ptr : tmp);
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_uniform3uiv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                               size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
+        GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
+        GLuint tmp[kMaxTempInts]; const GLuint* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, kMaxTempInts, &ptr);
+        if (n >= 3) glUniform3uiv(loc, static_cast<GLsizei>(n / 3), ptr ? ptr : tmp);
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_uniform4uiv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                               size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
+        GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0]));
+        GLuint tmp[kMaxTempInts]; const GLuint* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, kMaxTempInts, &ptr);
+        if (n >= 4) glUniform4uiv(loc, static_cast<GLsizei>(n / 4), ptr ? ptr : tmp);
+        return JSValueMakeUndefined(ctx);
+    }
+
+    // =========================================================================
+    // Non-square Matrix Uniforms (WebGL2)
+    // =========================================================================
+
+    #define UNIFORM_MAT_NONSQUARE(name, glFunc, divisor) \
+        JSValueRef GL_##name(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, \
+            size_t argc, const JSValueRef argv[], JSValueRef*) { \
+            auto* c = GetContext(thisObject); \
+            if (!c || !c->initialized || argc < 3) return JSValueMakeUndefined(ctx); \
+            GLint loc = static_cast<GLint>(GetGLId(ctx, argv[0])); \
+            GLboolean transpose = JSValueToBoolean(ctx, argv[1]); \
+            GLfloat tmp[kMaxTempFloats]; const GLfloat* ptr; \
+            size_t n = ExtractNumericArray(ctx, argv[2], tmp, kMaxTempFloats, &ptr); \
+            if (n >= divisor) \
+                glFunc(loc, static_cast<GLsizei>(n / divisor), transpose, ptr ? ptr : tmp); \
+            return JSValueMakeUndefined(ctx); \
         }
+
+    UNIFORM_MAT_NONSQUARE(uniformMatrix2x3fv, glUniformMatrix2x3fv, 6)
+    UNIFORM_MAT_NONSQUARE(uniformMatrix3x2fv, glUniformMatrix3x2fv, 6)
+    UNIFORM_MAT_NONSQUARE(uniformMatrix2x4fv, glUniformMatrix2x4fv, 8)
+    UNIFORM_MAT_NONSQUARE(uniformMatrix4x2fv, glUniformMatrix4x2fv, 8)
+    UNIFORM_MAT_NONSQUARE(uniformMatrix3x4fv, glUniformMatrix3x4fv, 12)
+    UNIFORM_MAT_NONSQUARE(uniformMatrix4x3fv, glUniformMatrix4x3fv, 12)
+
+    #undef UNIFORM_MAT_NONSQUARE
+
+    // =========================================================================
+    // Integer Vertex Attribs (WebGL2)
+    // =========================================================================
+
+    JSValueRef GL_vertexAttribIPointer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                       size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 5) return JSValueMakeUndefined(ctx);
+        GLuint index = static_cast<GLuint>(JSValueToNumber(ctx, argv[0], nullptr));
+        GLint size = static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr));
+        GLenum type = static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr));
+        GLsizei stride = static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr));
+        auto offset = static_cast<intptr_t>(JSValueToNumber(ctx, argv[4], nullptr));
+        glVertexAttribIPointer(index, size, type, stride, reinterpret_cast<const void*>(offset));
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_vertexAttribI4i(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                   size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 5) return JSValueMakeUndefined(ctx);
+        glVertexAttribI4i(
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[0], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[2], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr)));
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_vertexAttribI4ui(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                    size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 5) return JSValueMakeUndefined(ctx);
+        glVertexAttribI4ui(
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[0], nullptr)),
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[1], nullptr)),
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[2], nullptr)),
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[3], nullptr)),
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[4], nullptr)));
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_vertexAttribI4iv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                    size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
+        GLuint index = static_cast<GLuint>(JSValueToNumber(ctx, argv[0], nullptr));
+        GLint tmp[4]; const GLint* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, 4, &ptr);
+        if (n >= 4) glVertexAttribI4iv(index, ptr ? ptr : tmp);
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_vertexAttribI4uiv(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                     size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
+        GLuint index = static_cast<GLuint>(JSValueToNumber(ctx, argv[0], nullptr));
+        GLuint tmp[4]; const GLuint* ptr;
+        size_t n = ExtractNumericArray(ctx, argv[1], tmp, 4, &ptr);
+        if (n >= 4) glVertexAttribI4uiv(index, ptr ? ptr : tmp);
         return JSValueMakeUndefined(ctx);
     }
 

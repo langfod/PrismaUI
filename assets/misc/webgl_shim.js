@@ -30,6 +30,13 @@
         }
     }
 
+    // WebGL2 wrapper classes
+    class WebGLVertexArrayObject  { constructor(id) { this._id = id; } }
+    class WebGLSampler            { constructor(id) { this._id = id; } }
+    class WebGLSync               { constructor(id) { this._id = id; } }
+    class WebGLTransformFeedback  { constructor(id) { this._id = id; } }
+    class WebGLQuery              { constructor(id) { this._id = id; } }
+
     // Expose wrapper classes globally so C++ bridge can use them
     window.WebGLBuffer = WebGLBuffer;
     window.WebGLTexture = WebGLTexture;
@@ -40,6 +47,11 @@
     window.WebGLUniformLocation = WebGLUniformLocation;
     window.WebGLActiveInfo = WebGLActiveInfo;
     window.WebGLShaderPrecisionFormat = WebGLShaderPrecisionFormat;
+    window.WebGLVertexArrayObject = WebGLVertexArrayObject;
+    window.WebGLSampler = WebGLSampler;
+    window.WebGLSync = WebGLSync;
+    window.WebGLTransformFeedback = WebGLTransformFeedback;
+    window.WebGLQuery = WebGLQuery;
 
     // =========================================================================
     // Override HTMLCanvasElement.prototype.getContext
@@ -78,8 +90,14 @@
             visible = false;
         }
 
+        // Walk the iframe chain to accumulate parent frame offsets.
+        // In cross-origin nested iframes, window.frameElement is null — use
+        // the pre-computed __prismaFrameOffsetX/Y injected by the C++ Strategy 3
+        // injection as a fallback.
         var win = canvas.ownerDocument && canvas.ownerDocument.defaultView;
+        var walkedFrames = false;
         while (win && win.frameElement) {
+            walkedFrames = true;
             var fe = win.frameElement;
             if (__prismaIsHidden(fe)) {
                 visible = false;
@@ -90,6 +108,17 @@
                 y += fr.top || 0;
             }
             win = win.parent;
+        }
+
+        // Fallback: if we couldn't walk any frames (cross-origin), use the
+        // pre-computed offset from the parent's injection script.
+        if (!walkedFrames && win) {
+            if (typeof win.__prismaFrameOffsetX === 'number') {
+                x += win.__prismaFrameOffsetX;
+            }
+            if (typeof win.__prismaFrameOffsetY === 'number') {
+                y += win.__prismaFrameOffsetY;
+            }
         }
 
         if (w <= 0 || h <= 0 || rect.width === 0 || rect.height === 0) {
@@ -112,9 +141,6 @@
 
     HTMLCanvasElement.prototype.getContext = function(type, attrs) {
         if (type === 'webgl' || type === 'experimental-webgl' || type === 'webgl2') {
-            if (type === 'webgl2') {
-                console.warn('[WebGL] webgl2 requested but only webgl1 is available — returning webgl1 context');
-            }
 
             // Return cached context if already created for this canvas
             if (this.__prismaWebGLContext) {
@@ -156,22 +182,188 @@
                             }
                         }
                     }
+                    // For webgl2 contexts, also copy WebGL2-specific constants
+                    if (type === 'webgl2' && window.WebGL2RenderingContext) {
+                        var GL2 = window.WebGL2RenderingContext;
+                        for (var k in GL2) {
+                            if (GL2.hasOwnProperty(k) && typeof GL2[k] === 'number') {
+                                ctx[k] = GL2[k];
+                            }
+                        }
+                    }
 
                     // Wrap getExtension to log unsupported extension requests
+                    // and provide JS polyfills for extensions that can be emulated.
                     var _origGetExtension = ctx.getExtension.bind(ctx);
                     ctx.getExtension = function(name) {
                         var ext = _origGetExtension(name);
-                        if (!ext) {
-                            console.info('[WebGL] Extension not available: ' + name);
+                        if (ext) return ext;
+
+                        // WEBGL_multi_draw polyfill: batch draw calls via loop.
+                        // The native ANGLE build may not expose GL_ANGLE_multi_draw,
+                        // but we can emulate it with individual drawArrays/drawElements.
+                        if (name === 'WEBGL_multi_draw') {
+                            var _da = ctx.drawArrays.bind(ctx);
+                            var _de = ctx.drawElements.bind(ctx);
+                            return {
+                                multiDrawArraysWEBGL: function(mode, firstsList, firstsOffset,
+                                                               countsList, countsOffset, drawcount) {
+                                    for (var i = 0; i < drawcount; i++) {
+                                        _da(mode, firstsList[firstsOffset + i], countsList[countsOffset + i]);
+                                    }
+                                },
+                                multiDrawElementsWEBGL: function(mode, countsList, countsOffset,
+                                                                  type, offsetsList, offsetsOffset, drawcount) {
+                                    for (var i = 0; i < drawcount; i++) {
+                                        _de(mode, countsList[countsOffset + i], type, offsetsList[offsetsOffset + i]);
+                                    }
+                                },
+                                multiDrawArraysInstancedWEBGL: function(mode, firstsList, firstsOffset,
+                                                                        countsList, countsOffset,
+                                                                        instanceCountsList, instanceCountsOffset,
+                                                                        drawcount) {
+                                    var _dai = ctx.drawArraysInstanced.bind(ctx);
+                                    for (var i = 0; i < drawcount; i++) {
+                                        _dai(mode, firstsList[firstsOffset + i],
+                                             countsList[countsOffset + i],
+                                             instanceCountsList[instanceCountsOffset + i]);
+                                    }
+                                },
+                                multiDrawElementsInstancedWEBGL: function(mode, countsList, countsOffset,
+                                                                          type, offsetsList, offsetsOffset,
+                                                                          instanceCountsList, instanceCountsOffset,
+                                                                          drawcount) {
+                                    var _dei = ctx.drawElementsInstanced.bind(ctx);
+                                    for (var i = 0; i < drawcount; i++) {
+                                        _dei(mode, countsList[countsOffset + i], type,
+                                             offsetsList[offsetsOffset + i],
+                                             instanceCountsList[instanceCountsOffset + i]);
+                                    }
+                                }
+                            };
                         }
+
+                        console.info('[WebGL] Extension not available: ' + name);
                         return ext;
                     };
 
-                    // Wrap context in Proxy to log calls to unimplemented methods
+                    // Wrap getSupportedExtensions so JS-polyfilled extensions
+                    // (like WEBGL_multi_draw) appear in the list.
+                    var _origGetSupportedExtensions = ctx.getSupportedExtensions.bind(ctx);
+                    ctx.getSupportedExtensions = function() {
+                        var list = _origGetSupportedExtensions() || [];
+                        if (list.indexOf('WEBGL_multi_draw') === -1) {
+                            list.push('WEBGL_multi_draw');
+                        }
+                        return list;
+                    };
+
+                    // -------------------------------------------------------
+                    // Wrap texImage2D / texSubImage2D to handle HTMLImageElement,
+                    // HTMLCanvasElement, and ImageData sources (6-arg and 7-arg forms)
+                    // -------------------------------------------------------
+                    var _origTexImage2D = ctx.texImage2D.bind(ctx);
+                    var _origTexSubImage2D = ctx.texSubImage2D.bind(ctx);
+
+                    function __prismaIsImageSource(obj) {
+                        return (obj instanceof HTMLImageElement) ||
+                               (obj instanceof HTMLCanvasElement) ||
+                               (typeof ImageBitmap !== 'undefined' && obj instanceof ImageBitmap) ||
+                               (typeof ImageData !== 'undefined' && obj instanceof ImageData);
+                    }
+
+                    function __prismaExtractPixels(source) {
+                        var w, h, cvs, c2d;
+                        if (typeof ImageData !== 'undefined' && source instanceof ImageData) {
+                            return { data: new Uint8Array(source.data.buffer), width: source.width, height: source.height };
+                        }
+                        if (source instanceof HTMLCanvasElement) {
+                            cvs = source;
+                            w = cvs.width;
+                            h = cvs.height;
+                        } else {
+                            // HTMLImageElement or ImageBitmap
+                            w = source.naturalWidth || source.width;
+                            h = source.naturalHeight || source.height;
+                            if (!w || !h) {
+                                console.warn('[WebGL] texImage2D: image source has 0 dimensions');
+                                return null;
+                            }
+                            cvs = document.createElement('canvas');
+                            cvs.width = w;
+                            cvs.height = h;
+                        }
+                        c2d = cvs.getContext('2d');
+                        if (!c2d) {
+                            console.warn('[WebGL] texImage2D: failed to get 2d context for pixel extraction');
+                            return null;
+                        }
+                        if (source !== cvs) {
+                            c2d.drawImage(source, 0, 0);
+                        }
+                        var imageData = c2d.getImageData(0, 0, w, h);
+                        return { data: new Uint8Array(imageData.data.buffer), width: w, height: h };
+                    }
+
+                    ctx.texImage2D = function() {
+                        var args = arguments;
+                        // 6-arg form: (target, level, internalformat, format, type, source)
+                        if (args.length === 6 && __prismaIsImageSource(args[5])) {
+                            var pixels = __prismaExtractPixels(args[5]);
+                            if (pixels) {
+                                return _origTexImage2D(args[0], args[1], args[2],
+                                    pixels.width, pixels.height, 0, args[3], args[4], pixels.data);
+                            }
+                            return;
+                        }
+                        // 9-arg form where arg[8] is an image source instead of typed array
+                        if (args.length >= 9 && args[8] && __prismaIsImageSource(args[8])) {
+                            var pixels = __prismaExtractPixels(args[8]);
+                            if (pixels) {
+                                return _origTexImage2D(args[0], args[1], args[2],
+                                    args[3], args[4], args[5], args[6], args[7], pixels.data);
+                            }
+                            return;
+                        }
+                        return _origTexImage2D.apply(null, args);
+                    };
+
+                    ctx.texSubImage2D = function() {
+                        var args = arguments;
+                        // 7-arg form: (target, level, xoffset, yoffset, format, type, source)
+                        if (args.length === 7 && __prismaIsImageSource(args[6])) {
+                            var pixels = __prismaExtractPixels(args[6]);
+                            if (pixels) {
+                                return _origTexSubImage2D(args[0], args[1], args[2], args[3],
+                                    pixels.width, pixels.height, args[4], args[5], pixels.data);
+                            }
+                            return;
+                        }
+                        // 9-arg form where arg[8] is an image source
+                        if (args.length >= 9 && args[8] && __prismaIsImageSource(args[8])) {
+                            var pixels = __prismaExtractPixels(args[8]);
+                            if (pixels) {
+                                return _origTexSubImage2D(args[0], args[1], args[2], args[3],
+                                    args[4], args[5], args[6], args[7], pixels.data);
+                            }
+                            return;
+                        }
+                        return _origTexSubImage2D.apply(null, args);
+                    };
+
+                    // Wrap context in Proxy to log calls to unimplemented methods.
+                    // IMPORTANT: Native JSC functions use JSObjectGetPrivate(thisObject)
+                    // to retrieve the ANGLE context.  If `this` is the Proxy instead of
+                    // the raw target, JSObjectGetPrivate returns nullptr ⇒ null results.
+                    // So we bind every native function to the real target object.
                     const proxied = new Proxy(ctx, {
                         get(target, prop, receiver) {
                             if (prop in target) {
-                                return Reflect.get(target, prop, receiver);
+                                var val = target[prop];
+                                if (typeof val === 'function') {
+                                    return val.bind(target);
+                                }
+                                return val;
                             }
                             if (typeof prop === 'string') {
                                 return function() {
@@ -183,7 +375,9 @@
                         }
                     });
                     this.__prismaWebGLContext = proxied;
-                    window.__prismaWebGLContexts[window.__prismaWebGLContexts.length - 1] = proxied;
+                    // Keep the RAW native ctx in __prismaWebGLContexts (not the proxy)
+                    // because __prismaUpdateWebGLContext is a C++ function that calls
+                    // JSObjectGetPrivate() — which returns nullptr for a Proxy object.
 
                     // Kick an initial update so position/visibility are synced
                     __prismaUpdateAllWebGL();
@@ -414,33 +608,334 @@
     GL.SAMPLE_COVERAGE_VALUE = 0x80AA; GL.SAMPLE_COVERAGE_INVERT = 0x80AB;
 
     // =========================================================================
-    // Iframe support: auto-assign name attributes so C++ can target subframes.
-    // Ultralight's LockJSContext/EvaluateScript require the iframe 'name' attr.
+    // WebGL2 constants (OpenGL ES 3.0 additions)
+    // Defined on window.WebGL2RenderingContext and copied onto webgl2 contexts.
     // =========================================================================
-    function nameIframes() {
-        var iframes = document.querySelectorAll('iframe');
-        for (var i = 0; i < iframes.length; i++) {
-            if (!iframes[i].name) {
-                iframes[i].name = '__prisma_frame_' + i;
-            }
-        }
-    }
-    nameIframes();
+    window.WebGL2RenderingContext = function() {};
+    var GL2 = window.WebGL2RenderingContext;
 
-    // Watch for dynamically added iframes and name them immediately
-    if (typeof MutationObserver !== 'undefined' && document.documentElement) {
-        new MutationObserver(function(mutations) {
-            var needsNaming = false;
-            mutations.forEach(function(m) {
-                m.addedNodes.forEach(function(n) {
-                    if (n.tagName === 'IFRAME' || (n.querySelectorAll && n.querySelectorAll('iframe').length)) {
-                        needsNaming = true;
-                    }
-                });
-            });
-            if (needsNaming) nameIframes();
-        }).observe(document.documentElement, { childList: true, subtree: true });
+    // Getting GL parameter information
+    GL2.READ_BUFFER = 0x0C02;
+    GL2.UNPACK_ROW_LENGTH = 0x0CF2; GL2.UNPACK_SKIP_ROWS = 0x0CF3;
+    GL2.UNPACK_SKIP_PIXELS = 0x0CF4;
+    GL2.PACK_ROW_LENGTH = 0x0D02; GL2.PACK_SKIP_ROWS = 0x0D03;
+    GL2.PACK_SKIP_PIXELS = 0x0D04;
+    GL2.TEXTURE_BINDING_3D = 0x806A;
+    GL2.UNPACK_SKIP_IMAGES = 0x806D; GL2.UNPACK_IMAGE_HEIGHT = 0x806E;
+    GL2.MAX_3D_TEXTURE_SIZE = 0x8073;
+    GL2.MAX_ELEMENTS_VERTICES = 0x80E8; GL2.MAX_ELEMENTS_INDICES = 0x80E9;
+    GL2.MAX_TEXTURE_LOD_BIAS = 0x84FD;
+    GL2.MAX_FRAGMENT_UNIFORM_COMPONENTS = 0x8B49;
+    GL2.MAX_VERTEX_UNIFORM_COMPONENTS = 0x8B4A;
+    GL2.MAX_ARRAY_TEXTURE_LAYERS = 0x88FF;
+    GL2.MIN_PROGRAM_TEXEL_OFFSET = 0x8904;
+    GL2.MAX_PROGRAM_TEXEL_OFFSET = 0x8905;
+    GL2.MAX_VARYING_COMPONENTS = 0x8B4B;
+    GL2.FRAGMENT_SHADER_DERIVATIVE_HINT = 0x8B8B;
+    GL2.RASTERIZER_DISCARD = 0x8C89;
+    GL2.VERTEX_ARRAY_BINDING = 0x85B5;
+    GL2.MAX_VERTEX_OUTPUT_COMPONENTS = 0x9122;
+    GL2.MAX_FRAGMENT_INPUT_COMPONENTS = 0x9125;
+    GL2.MAX_SERVER_WAIT_TIMEOUT = 0x9111;
+    GL2.MAX_ELEMENT_INDEX = 0x8D6B;
+
+    // 3D textures
+    GL2.TEXTURE_3D = 0x806F; GL2.TEXTURE_WRAP_R = 0x8072;
+    GL2.TEXTURE_MIN_LOD = 0x813A; GL2.TEXTURE_MAX_LOD = 0x813B;
+    GL2.TEXTURE_BASE_LEVEL = 0x813C; GL2.TEXTURE_MAX_LEVEL = 0x813D;
+    GL2.TEXTURE_COMPARE_MODE = 0x884C; GL2.TEXTURE_COMPARE_FUNC = 0x884D;
+    GL2.COMPARE_REF_TO_TEXTURE = 0x884E;
+    GL2.TEXTURE_2D_ARRAY = 0x8C1A; GL2.TEXTURE_BINDING_2D_ARRAY = 0x8C1D;
+    GL2.TEXTURE_IMMUTABLE_FORMAT = 0x912F; GL2.TEXTURE_IMMUTABLE_LEVELS = 0x82DF;
+
+    // sRGB
+    GL2.SRGB = 0x8C40; GL2.SRGB8 = 0x8C41; GL2.SRGB8_ALPHA8 = 0x8C43;
+
+    // Sized internal formats
+    GL2.RED = 0x1903; GL2.RGB8 = 0x8051; GL2.RGBA8 = 0x8058;
+    GL2.RGB10_A2 = 0x8059; GL2.RGB10_A2UI = 0x906F;
+    GL2.R8 = 0x8229; GL2.RG8 = 0x822B;
+    GL2.R16F = 0x822D; GL2.R32F = 0x822E;
+    GL2.RG16F = 0x822F; GL2.RG32F = 0x8230;
+    GL2.R8I = 0x8231; GL2.R8UI = 0x8232;
+    GL2.R16I = 0x8233; GL2.R16UI = 0x8234;
+    GL2.R32I = 0x8235; GL2.R32UI = 0x8236;
+    GL2.RG8I = 0x8237; GL2.RG8UI = 0x8238;
+    GL2.RG16I = 0x8239; GL2.RG16UI = 0x823A;
+    GL2.RG32I = 0x823B; GL2.RG32UI = 0x823C;
+    GL2.RGBA32F = 0x8814; GL2.RGB32F = 0x8815;
+    GL2.RGBA16F = 0x881A; GL2.RGB16F = 0x881B;
+    GL2.R11F_G11F_B10F = 0x8C3A; GL2.RGB9_E5 = 0x8C3D;
+    GL2.R8_SNORM = 0x8F94; GL2.RG8_SNORM = 0x8F95;
+    GL2.RGB8_SNORM = 0x8F96; GL2.RGBA8_SNORM = 0x8F97;
+
+    // Integer texture formats
+    GL2.RGBA32UI = 0x8D70; GL2.RGB32UI = 0x8D71;
+    GL2.RGBA16UI = 0x8D76; GL2.RGB16UI = 0x8D77;
+    GL2.RGBA8UI = 0x8D7C; GL2.RGB8UI = 0x8D7D;
+    GL2.RGBA32I = 0x8D82; GL2.RGB32I = 0x8D83;
+    GL2.RGBA16I = 0x8D88; GL2.RGB16I = 0x8D89;
+    GL2.RGBA8I = 0x8D8E; GL2.RGB8I = 0x8D8F;
+    GL2.RED_INTEGER = 0x8D94; GL2.RGB_INTEGER = 0x8D98;
+    GL2.RGBA_INTEGER = 0x8D99;
+
+    // Pixel types
+    GL2.UNSIGNED_INT_2_10_10_10_REV = 0x8368;
+    GL2.UNSIGNED_INT_10F_11F_11F_REV = 0x8C3B;
+    GL2.UNSIGNED_INT_5_9_9_9_REV = 0x8C3E;
+    GL2.FLOAT_32_UNSIGNED_INT_24_8_REV = 0x8DAD;
+    GL2.UNSIGNED_INT_24_8 = 0x84FA;
+    GL2.HALF_FLOAT = 0x140B;
+    GL2.RG = 0x8227; GL2.RG_INTEGER = 0x8228;
+    GL2.INT_2_10_10_10_REV = 0x8D9F;
+
+    // Uniform Buffer Objects
+    GL2.UNIFORM_BUFFER = 0x8A11;
+    GL2.UNIFORM_BUFFER_BINDING = 0x8A28;
+    GL2.UNIFORM_BUFFER_START = 0x8A29; GL2.UNIFORM_BUFFER_SIZE = 0x8A2A;
+    GL2.MAX_VERTEX_UNIFORM_BLOCKS = 0x8A2B;
+    GL2.MAX_FRAGMENT_UNIFORM_BLOCKS = 0x8A2D;
+    GL2.MAX_COMBINED_UNIFORM_BLOCKS = 0x8A2E;
+    GL2.MAX_UNIFORM_BUFFER_BINDINGS = 0x8A2F;
+    GL2.MAX_UNIFORM_BLOCK_SIZE = 0x8A30;
+    GL2.MAX_COMBINED_VERTEX_UNIFORM_COMPONENTS = 0x8A31;
+    GL2.MAX_COMBINED_FRAGMENT_UNIFORM_COMPONENTS = 0x8A33;
+    GL2.UNIFORM_BUFFER_OFFSET_ALIGNMENT = 0x8A34;
+    GL2.ACTIVE_UNIFORM_BLOCKS = 0x8A36;
+    GL2.UNIFORM_TYPE = 0x8A37; GL2.UNIFORM_SIZE = 0x8A38;
+    GL2.UNIFORM_BLOCK_INDEX = 0x8A3A;
+    GL2.UNIFORM_OFFSET = 0x8A3B;
+    GL2.UNIFORM_ARRAY_STRIDE = 0x8A3C; GL2.UNIFORM_MATRIX_STRIDE = 0x8A3D;
+    GL2.UNIFORM_IS_ROW_MAJOR = 0x8A3E;
+    GL2.UNIFORM_BLOCK_BINDING = 0x8A3F;
+    GL2.UNIFORM_BLOCK_DATA_SIZE = 0x8A40;
+    GL2.UNIFORM_BLOCK_ACTIVE_UNIFORMS = 0x8A42;
+    GL2.UNIFORM_BLOCK_ACTIVE_UNIFORM_INDICES = 0x8A43;
+    GL2.UNIFORM_BLOCK_REFERENCED_BY_VERTEX_SHADER = 0x8A44;
+    GL2.UNIFORM_BLOCK_REFERENCED_BY_FRAGMENT_SHADER = 0x8A46;
+
+    // Transform Feedback
+    GL2.TRANSFORM_FEEDBACK_BUFFER_MODE = 0x8C7F;
+    GL2.MAX_TRANSFORM_FEEDBACK_SEPARATE_COMPONENTS = 0x8C80;
+    GL2.TRANSFORM_FEEDBACK_VARYINGS = 0x8C83;
+    GL2.TRANSFORM_FEEDBACK_BUFFER_START = 0x8C84;
+    GL2.TRANSFORM_FEEDBACK_BUFFER_SIZE = 0x8C85;
+    GL2.TRANSFORM_FEEDBACK_PRIMITIVES_WRITTEN = 0x8C88;
+    GL2.MAX_TRANSFORM_FEEDBACK_INTERLEAVED_COMPONENTS = 0x8C8A;
+    GL2.MAX_TRANSFORM_FEEDBACK_SEPARATE_ATTRIBS = 0x8C8B;
+    GL2.INTERLEAVED_ATTRIBS = 0x8C8C; GL2.SEPARATE_ATTRIBS = 0x8C8D;
+    GL2.TRANSFORM_FEEDBACK_BUFFER = 0x8C8E;
+    GL2.TRANSFORM_FEEDBACK_BUFFER_BINDING = 0x8C8F;
+    GL2.TRANSFORM_FEEDBACK = 0x8E22;
+    GL2.TRANSFORM_FEEDBACK_PAUSED = 0x8E23;
+    GL2.TRANSFORM_FEEDBACK_ACTIVE = 0x8E24;
+    GL2.TRANSFORM_FEEDBACK_BINDING = 0x8E25;
+
+    // Samplers (shader uniform types)
+    GL2.SAMPLER_3D = 0x8B5F;
+    GL2.SAMPLER_2D_SHADOW = 0x8B62;
+    GL2.SAMPLER_2D_ARRAY = 0x8DC1; GL2.SAMPLER_2D_ARRAY_SHADOW = 0x8DC4;
+    GL2.SAMPLER_CUBE_SHADOW = 0x8DC5;
+    GL2.INT_SAMPLER_2D = 0x8DCA; GL2.INT_SAMPLER_3D = 0x8DCB;
+    GL2.INT_SAMPLER_CUBE = 0x8DCC; GL2.INT_SAMPLER_2D_ARRAY = 0x8DCF;
+    GL2.UNSIGNED_INT_SAMPLER_2D = 0x8DD2; GL2.UNSIGNED_INT_SAMPLER_3D = 0x8DD3;
+    GL2.UNSIGNED_INT_SAMPLER_CUBE = 0x8DD4; GL2.UNSIGNED_INT_SAMPLER_2D_ARRAY = 0x8DD7;
+    GL2.MAX_SAMPLES = 0x8D57; GL2.SAMPLER_BINDING = 0x8919;
+
+    // Queries
+    GL2.CURRENT_QUERY = 0x8865;
+    GL2.QUERY_RESULT = 0x8866; GL2.QUERY_RESULT_AVAILABLE = 0x8867;
+    GL2.ANY_SAMPLES_PASSED = 0x8C2F;
+    GL2.ANY_SAMPLES_PASSED_CONSERVATIVE = 0x8D6A;
+
+    // Draw buffers / MRT
+    GL2.MAX_DRAW_BUFFERS = 0x8824; GL2.MAX_COLOR_ATTACHMENTS = 0x8CDF;
+    GL2.DRAW_BUFFER0 = 0x8825; GL2.DRAW_BUFFER1 = 0x8826;
+    GL2.DRAW_BUFFER2 = 0x8827; GL2.DRAW_BUFFER3 = 0x8828;
+    GL2.DRAW_BUFFER4 = 0x8829; GL2.DRAW_BUFFER5 = 0x882A;
+    GL2.DRAW_BUFFER6 = 0x882B; GL2.DRAW_BUFFER7 = 0x882C;
+    GL2.DRAW_BUFFER8 = 0x882D; GL2.DRAW_BUFFER9 = 0x882E;
+    GL2.DRAW_BUFFER10 = 0x882F; GL2.DRAW_BUFFER11 = 0x8830;
+    GL2.DRAW_BUFFER12 = 0x8831; GL2.DRAW_BUFFER13 = 0x8832;
+    GL2.DRAW_BUFFER14 = 0x8833; GL2.DRAW_BUFFER15 = 0x8834;
+    GL2.COLOR_ATTACHMENT1 = 0x8CE1; GL2.COLOR_ATTACHMENT2 = 0x8CE2;
+    GL2.COLOR_ATTACHMENT3 = 0x8CE3; GL2.COLOR_ATTACHMENT4 = 0x8CE4;
+    GL2.COLOR_ATTACHMENT5 = 0x8CE5; GL2.COLOR_ATTACHMENT6 = 0x8CE6;
+    GL2.COLOR_ATTACHMENT7 = 0x8CE7; GL2.COLOR_ATTACHMENT8 = 0x8CE8;
+    GL2.COLOR_ATTACHMENT9 = 0x8CE9; GL2.COLOR_ATTACHMENT10 = 0x8CEA;
+    GL2.COLOR_ATTACHMENT11 = 0x8CEB; GL2.COLOR_ATTACHMENT12 = 0x8CEC;
+    GL2.COLOR_ATTACHMENT13 = 0x8CED; GL2.COLOR_ATTACHMENT14 = 0x8CEE;
+    GL2.COLOR_ATTACHMENT15 = 0x8CEF;
+
+    // Sync objects
+    GL2.OBJECT_TYPE = 0x9112; GL2.SYNC_CONDITION = 0x9113;
+    GL2.SYNC_STATUS = 0x9114; GL2.SYNC_FLAGS = 0x9115;
+    GL2.SYNC_FENCE = 0x9116; GL2.SYNC_GPU_COMMANDS_COMPLETE = 0x9117;
+    GL2.UNSIGNALED = 0x9118; GL2.SIGNALED = 0x9119;
+    GL2.ALREADY_SIGNALED = 0x911A; GL2.TIMEOUT_EXPIRED = 0x911B;
+    GL2.CONDITION_SATISFIED = 0x911C; GL2.WAIT_FAILED = 0x911D;
+    GL2.SYNC_FLUSH_COMMANDS_BIT = 0x00000001;
+
+    // Framebuffer / Renderbuffer (new in WebGL2)
+    GL2.FRAMEBUFFER_ATTACHMENT_COLOR_ENCODING = 0x8210;
+    GL2.FRAMEBUFFER_ATTACHMENT_COMPONENT_TYPE = 0x8211;
+    GL2.FRAMEBUFFER_ATTACHMENT_RED_SIZE = 0x8212;
+    GL2.FRAMEBUFFER_ATTACHMENT_GREEN_SIZE = 0x8213;
+    GL2.FRAMEBUFFER_ATTACHMENT_BLUE_SIZE = 0x8214;
+    GL2.FRAMEBUFFER_ATTACHMENT_ALPHA_SIZE = 0x8215;
+    GL2.FRAMEBUFFER_ATTACHMENT_DEPTH_SIZE = 0x8216;
+    GL2.FRAMEBUFFER_ATTACHMENT_STENCIL_SIZE = 0x8217;
+    GL2.FRAMEBUFFER_DEFAULT = 0x8218;
+    GL2.DEPTH24_STENCIL8 = 0x88F0;
+    GL2.DRAW_FRAMEBUFFER_BINDING = 0x8CA6;
+    GL2.READ_FRAMEBUFFER = 0x8CA8; GL2.DRAW_FRAMEBUFFER = 0x8CA9;
+    GL2.READ_FRAMEBUFFER_BINDING = 0x8CAA;
+    GL2.RENDERBUFFER_SAMPLES = 0x8CAB;
+    GL2.FRAMEBUFFER_ATTACHMENT_TEXTURE_LAYER = 0x8CD4;
+    GL2.FRAMEBUFFER_INCOMPLETE_MULTISAMPLE = 0x8D56;
+
+    // Buffer targets (new in WebGL2)
+    GL2.PIXEL_PACK_BUFFER = 0x88EB; GL2.PIXEL_UNPACK_BUFFER = 0x88EC;
+    GL2.PIXEL_PACK_BUFFER_BINDING = 0x88ED;
+    GL2.PIXEL_UNPACK_BUFFER_BINDING = 0x88EF;
+    GL2.COPY_READ_BUFFER = 0x8F36; GL2.COPY_WRITE_BUFFER = 0x8F37;
+    GL2.COPY_READ_BUFFER_BINDING = 0x8F36; GL2.COPY_WRITE_BUFFER_BINDING = 0x8F37;
+
+    // Data types (new in WebGL2)
+    GL2.FLOAT_MAT2x3 = 0x8B65; GL2.FLOAT_MAT2x4 = 0x8B66;
+    GL2.FLOAT_MAT3x2 = 0x8B67; GL2.FLOAT_MAT3x4 = 0x8B68;
+    GL2.FLOAT_MAT4x2 = 0x8B69; GL2.FLOAT_MAT4x3 = 0x8B6A;
+    GL2.UNSIGNED_INT_VEC2 = 0x8DC6; GL2.UNSIGNED_INT_VEC3 = 0x8DC7;
+    GL2.UNSIGNED_INT_VEC4 = 0x8DC8;
+    GL2.UNSIGNED_NORMALIZED = 0x8C17; GL2.SIGNED_NORMALIZED = 0x8F9C;
+
+    // Vertex attribute constants (new in WebGL2)
+    GL2.VERTEX_ATTRIB_ARRAY_INTEGER = 0x88FD;
+    GL2.VERTEX_ATTRIB_ARRAY_DIVISOR = 0x88FE;
+
+    // Miscellaneous (new in WebGL2)
+    GL2.COLOR = 0x1800; GL2.DEPTH = 0x1801; GL2.STENCIL = 0x1802;
+    GL2.MIN = 0x8007; GL2.MAX = 0x8008;
+    GL2.DEPTH_COMPONENT24 = 0x81A6;
+    GL2.DEPTH_COMPONENT32F = 0x8CAC; GL2.DEPTH32F_STENCIL8 = 0x8CAD;
+    GL2.STREAM_READ = 0x88E1; GL2.STREAM_COPY = 0x88E2;
+    GL2.STATIC_READ = 0x88E5; GL2.STATIC_COPY = 0x88E6;
+    GL2.DYNAMIC_READ = 0x88E9; GL2.DYNAMIC_COPY = 0x88EA;
+    GL2.INVALID_INDEX = 0xFFFFFFFF;
+    GL2.TIMEOUT_IGNORED = -1;
+    GL2.MAX_CLIENT_WAIT_TIMEOUT_WEBGL = 0x9247;
+
+    // =========================================================================
+    // Keyboard event shim
+    // Ultralight's FireKeyEvent does not populate DOM KeyboardEvent properties
+    // (key, code, keyCode) in this version. We work around this by having C++
+    // set window.__prismaKeyInfo before each FireKeyEvent call, then a
+    // capture-phase listener enriches the empty native event using
+    // Object.defineProperty before any application handler sees it.
+    // =========================================================================
+
+    var __prismaVKMap = {
+        8: {key: 'Backspace', code: 'Backspace'},
+        9: {key: 'Tab', code: 'Tab'},
+        13: {key: 'Enter', code: 'Enter'},
+        16: {key: 'Shift', code: 'ShiftLeft'},
+        17: {key: 'Control', code: 'ControlLeft'},
+        18: {key: 'Alt', code: 'AltLeft'},
+        19: {key: 'Pause', code: 'Pause'},
+        20: {key: 'CapsLock', code: 'CapsLock'},
+        27: {key: 'Escape', code: 'Escape'},
+        32: {key: ' ', code: 'Space'},
+        33: {key: 'PageUp', code: 'PageUp'},
+        34: {key: 'PageDown', code: 'PageDown'},
+        35: {key: 'End', code: 'End'},
+        36: {key: 'Home', code: 'Home'},
+        37: {key: 'ArrowLeft', code: 'ArrowLeft'},
+        38: {key: 'ArrowUp', code: 'ArrowUp'},
+        39: {key: 'ArrowRight', code: 'ArrowRight'},
+        40: {key: 'ArrowDown', code: 'ArrowDown'},
+        45: {key: 'Insert', code: 'Insert'},
+        46: {key: 'Delete', code: 'Delete'},
+        91: {key: 'Meta', code: 'MetaLeft'},
+        92: {key: 'Meta', code: 'MetaRight'},
+        93: {key: 'ContextMenu', code: 'ContextMenu'},
+        112: {key: 'F1', code: 'F1'}, 113: {key: 'F2', code: 'F2'},
+        114: {key: 'F3', code: 'F3'}, 115: {key: 'F4', code: 'F4'},
+        116: {key: 'F5', code: 'F5'}, 117: {key: 'F6', code: 'F6'},
+        118: {key: 'F7', code: 'F7'}, 119: {key: 'F8', code: 'F8'},
+        120: {key: 'F9', code: 'F9'}, 121: {key: 'F10', code: 'F10'},
+        122: {key: 'F11', code: 'F11'}, 123: {key: 'F12', code: 'F12'},
+        144: {key: 'NumLock', code: 'NumLock'},
+        145: {key: 'ScrollLock', code: 'ScrollLock'},
+        186: {key: ';', code: 'Semicolon'},
+        187: {key: '=', code: 'Equal'},
+        188: {key: ',', code: 'Comma'},
+        189: {key: '-', code: 'Minus'},
+        190: {key: '.', code: 'Period'},
+        191: {key: '/', code: 'Slash'},
+        192: {key: '`', code: 'Backquote'},
+        219: {key: '[', code: 'BracketLeft'},
+        220: {key: '\\', code: 'Backslash'},
+        221: {key: ']', code: 'BracketRight'},
+        222: {key: "'", code: 'Quote'}
+    };
+
+    // A-Z (65-90)
+    for (var i = 65; i <= 90; i++) {
+        __prismaVKMap[i] = {key: String.fromCharCode(i + 32), code: 'Key' + String.fromCharCode(i)};
     }
+    // 0-9 (48-57)
+    for (var i = 48; i <= 57; i++) {
+        __prismaVKMap[i] = {key: String(i - 48), code: 'Digit' + String(i - 48)};
+    }
+    // Numpad 0-9 (96-105)
+    for (var i = 96; i <= 105; i++) {
+        __prismaVKMap[i] = {key: String(i - 96), code: 'Numpad' + String(i - 96)};
+    }
+    // Numpad operators
+    __prismaVKMap[106] = {key: '*', code: 'NumpadMultiply'};
+    __prismaVKMap[107] = {key: '+', code: 'NumpadAdd'};
+    __prismaVKMap[109] = {key: '-', code: 'NumpadSubtract'};
+    __prismaVKMap[110] = {key: '.', code: 'NumpadDecimal'};
+    __prismaVKMap[111] = {key: '/', code: 'NumpadDivide'};
+
+    // EvaluateScript runs in the main frame context, so __prismaKeyInfo is
+    // set on the top window.  Subframes must read from window.top to find it.
+    var __prismaKeyInfoOwner = (function() {
+        try { return window.top || window; } catch(e) { return window; }
+    })();
+
+    function __prismaEnrichKeyEvent(e) {
+        var info = __prismaKeyInfoOwner.__prismaKeyInfo;
+        if (!info) return;
+
+        var mapped = __prismaVKMap[info.vk];
+        if (!mapped) return;
+
+        var shiftKey = !!(info.mods & 8);
+        var ctrlKey = !!(info.mods & 2);
+        var altKey = !!(info.mods & 1);
+        var metaKey = !!(info.mods & 4);
+
+        var key = mapped.key;
+        // Shift transforms single-char letter keys to uppercase
+        if (key.length === 1 && shiftKey && key >= 'a' && key <= 'z') {
+            key = key.toUpperCase();
+        }
+
+        Object.defineProperty(e, 'key', {value: key, configurable: true});
+        Object.defineProperty(e, 'code', {value: mapped.code, configurable: true});
+        Object.defineProperty(e, 'keyCode', {value: info.vk, configurable: true});
+        Object.defineProperty(e, 'which', {value: info.vk, configurable: true});
+        Object.defineProperty(e, 'shiftKey', {value: shiftKey, configurable: true});
+        Object.defineProperty(e, 'ctrlKey', {value: ctrlKey, configurable: true});
+        Object.defineProperty(e, 'altKey', {value: altKey, configurable: true});
+        Object.defineProperty(e, 'metaKey', {value: metaKey, configurable: true});
+
+        __prismaKeyInfoOwner.__prismaKeyInfo = null;
+    }
+
+    document.addEventListener('keydown', __prismaEnrichKeyEvent, true);
+    document.addEventListener('keyup', __prismaEnrichKeyEvent, true);
 
     console.log('[PrismaUI] WebGL shim loaded');
 })();

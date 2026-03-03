@@ -99,52 +99,96 @@ namespace PrismaUI::Listeners {
         });
     }
 
+    // Helper: inject WebGL shim into a subframe by recursively searching all
+    // iframes from the main frame's context.  Runs JS in the main frame (empty
+    // frame name — always works) which walks the iframe tree, matches by URL,
+    // copies native bridge functions, computes accumulated iframe offsets, and
+    // evals the shim source in the target frame's contentWindow.
+    static bool InjectWebGLIntoSubframeViaMainFrame(View* caller, Core::PrismaViewId viewId,
+                                                    const std::string& targetUrl) {
+        std::string escapedUrl = EscapeForJSString(targetUrl);
+
+        std::string script = R"JS(
+            (function() {
+                var targetUrl = ')JS" + escapedUrl + R"JS(';
+                var shimSrc = window.__prismaShimSource;
+                if (!shimSrc || typeof __prismaCreateWebGLContext !== 'function')
+                    return 'no_shim';
+                function search(doc, offX, offY) {
+                    var iframes = doc.querySelectorAll('iframe');
+                    for (var i = 0; i < iframes.length; i++) {
+                        try {
+                            var cw = iframes[i].contentWindow;
+                            if (!cw) continue;
+                            var fr = iframes[i].getBoundingClientRect();
+                            var nx = offX + (fr.left || 0);
+                            var ny = offY + (fr.top || 0);
+                            var loc = '';
+                            try { loc = cw.location.href; } catch(e) { continue; }
+                            if (loc === targetUrl) {
+                                if (typeof cw.__prismaWebGLShimLoaded !== 'undefined')
+                                    return 'already';
+                                cw.__prismaCreateWebGLContext = __prismaCreateWebGLContext;
+                                cw.__prismaUpdateWebGLContext = __prismaUpdateWebGLContext;
+                                cw.__prismaShimSource = shimSrc;
+                                cw.__prismaFrameOffsetX = nx;
+                                cw.__prismaFrameOffsetY = ny;
+                                cw.eval(shimSrc);
+                                return 'injected';
+                            }
+                            if (cw.document) {
+                                var r = search(cw.document, nx, ny);
+                                if (r === 'injected' || r === 'already') return r;
+                            }
+                        } catch(e) {}
+                    }
+                    return 'not_found';
+                }
+                return search(document, 0, 0);
+            })()
+        )JS";
+
+        String exception;
+        String result = caller->EvaluateScript(String(script.c_str()), &exception, String(""));
+
+        if (!exception.empty()) {
+            logger::warn("View [{}]: Recursive subframe inject script failed: {}", viewId,
+                         exception.utf8().data());
+            return false;
+        }
+
+        std::string resultStr(result.utf8().data(), result.utf8().length());
+        logger::info("View [{}]: Recursive subframe inject for '{}' => {}", viewId,
+                     targetUrl, resultStr);
+
+        return resultStr == "injected" || resultStr == "already";
+    }
+
     void MyLoadListener::OnWindowObjectReady(View* caller, uint64_t /*frame_id*/, bool is_main_frame,
-                                             const String& /*url*/) {
+                                             const String& url) {
         if (is_main_frame) {
             logger::info("View [{}]: LoadListener: Window object ready.", viewId_);
 
             InjectWebGLIntoMainFrame(caller, viewId_);
             webglInjectedForLoad_ = true;
         } else {
-            // Subframe: LockJSContext(frameName) and EvaluateScript(script, exc, frameName)
-            // do NOT work with dynamically-set iframe name attributes in Ultralight.
-            // Instead, inject WebGL into iframes via cross-frame contentWindow access
-            // from the main frame's JS context.
-            logger::info("View [{}]: LoadListener: Subframe window object ready.", viewId_);
+            // Subframe: inject WebGL shim by running JS in the main frame that
+            // recursively searches all iframes for the matching URL and injects
+            // via contentWindow.eval().  No hardcoded frame names needed.
+            std::string urlStr(url.utf8().data(), url.utf8().length());
 
-            String result = caller->EvaluateScript(String(R"JS(
-                (function() {
-                    var shimSrc = window.__prismaShimSource;
-                    if (!shimSrc || typeof window.__prismaCreateWebGLContext !== 'function') {
-                        return 'no_shim_or_bridge';
-                    }
-                    var injected = 0;
-                    var iframes = document.querySelectorAll('iframe');
-                    for (var i = 0; i < iframes.length; i++) {
-                        try {
-                            var win = iframes[i].contentWindow;
-                            if (!win || win.__prismaWebGLShimLoaded) continue;
-                            // Skip about:blank iframes — they inherit the parent's CSP
-                            // (which blocks eval) and don't need WebGL anyway.
-                            var src = iframes[i].getAttribute('src') || '';
-                            if (!src || src === 'about:blank') continue;
-                            // Copy native bridge functions to iframe's window
-                            win.__prismaCreateWebGLContext = window.__prismaCreateWebGLContext;
-                            win.__prismaUpdateWebGLContext = window.__prismaUpdateWebGLContext;
-                            // Execute shim in the iframe's JS context
-                            win.eval(shimSrc);
-                            injected++;
-                        } catch(e) {
-                            console.log('[PrismaUI] iframe WebGL injection error: ' + e);
-                        }
-                    }
-                    return 'injected:' + injected;
-                })()
-            )JS"), nullptr, String(""));
+            // Skip about:blank and about:srcdoc — these are iframe placeholders
+            // that fire OnWindowObjectReady but don't need WebGL injection.
+            if (urlStr == "about:blank" || urlStr == "about:srcdoc") {
+                logger::info("View [{}]: LoadListener: Skipping subframe placeholder: {}", viewId_, urlStr);
+                return;
+            }
 
-            logger::info("View [{}]: Subframe WebGL injection result: {}", viewId_,
-                          std::string(result.utf8().data(), result.utf8().length()));
+            logger::info("View [{}]: LoadListener: Subframe window object ready, URL: {}", viewId_, urlStr);
+
+            if (!InjectWebGLIntoSubframeViaMainFrame(caller, viewId_, urlStr)) {
+                logger::warn("View [{}]: Could not inject into subframe URL: {}", viewId_, urlStr);
+            }
         }
     }
 
@@ -168,8 +212,10 @@ namespace PrismaUI::Listeners {
 
     MyViewListener::~MyViewListener() = default;
 
-    void MyViewListener::OnAddConsoleMessage(View* /*caller*/, const ConsoleMessage& message) {
-        // logger::info("View [{}]: JSConsole: {}", viewId_, message.message().utf8().data());
+    void MyViewListener::OnAddConsoleMessage([[maybe_unused]] View* caller, [[maybe_unused]] const ConsoleMessage& message) {
+        auto callerUrl = caller ? caller->url().utf8().data() : "unknown";
+        logger::info("View [{}] on {}: JSConsole: {}", viewId_, callerUrl, message.message().utf8().data());
+
         std::shared_lock lock(viewsMutex);
         auto it = views.find(viewId_);
         if (it != views.end() && it->second && it->second->consoleMessageCallback) {
@@ -189,7 +235,7 @@ namespace PrismaUI::Listeners {
         }
     }
 
-    RefPtr<View> MyViewListener::OnCreateInspectorView(View* /*caller*/, bool is_local, const String& inspectedURL) {
+    RefPtr<View> MyViewListener::OnCreateInspectorView([[maybe_unused]] View* caller, bool is_local, const String& inspectedURL) {
         logger::info(
             "View [{}]: ViewListener: OnCreateInspectorView called (is_local={}, "
             "URL={})",

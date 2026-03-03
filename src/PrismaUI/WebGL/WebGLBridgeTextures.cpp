@@ -1,5 +1,7 @@
 #include "WebGLBridgeInternal.h"
 
+#include <vector>
+
 namespace PrismaUI::WebGL {
 
     // =========================================================================
@@ -321,6 +323,299 @@ namespace PrismaUI::WebGL {
         glFlush();
         ReadbackToSharedTexture(c);
 
+        return JSValueMakeUndefined(ctx);
+    }
+
+    // =========================================================================
+    // Instanced Drawing (WebGL2)
+    // =========================================================================
+
+    JSValueRef GL_drawArraysInstanced(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                       size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 4) return JSValueMakeUndefined(ctx);
+        glDrawArraysInstanced(
+            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
+            static_cast<GLsizei>(JSValueToNumber(ctx, argv[2], nullptr)),
+            static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr)));
+        glFlush();
+        ReadbackToSharedTexture(c);
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_drawElementsInstanced(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                         size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 5) return JSValueMakeUndefined(ctx);
+
+        GLenum mode = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
+        GLsizei count = static_cast<GLsizei>(JSValueToNumber(ctx, argv[1], nullptr));
+        GLenum type = static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr));
+        auto offset = static_cast<intptr_t>(JSValueToNumber(ctx, argv[3], nullptr));
+        GLsizei instanceCount = static_cast<GLsizei>(JSValueToNumber(ctx, argv[4], nullptr));
+
+        glDrawElementsInstanced(mode, count, type, reinterpret_cast<const void*>(offset), instanceCount);
+        glFlush();
+        ReadbackToSharedTexture(c);
+
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_drawRangeElements(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                     size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 6) return JSValueMakeUndefined(ctx);
+
+        GLenum mode = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
+        GLuint start = static_cast<GLuint>(JSValueToNumber(ctx, argv[1], nullptr));
+        GLuint end = static_cast<GLuint>(JSValueToNumber(ctx, argv[2], nullptr));
+        GLsizei count = static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr));
+        GLenum type = static_cast<GLenum>(JSValueToNumber(ctx, argv[4], nullptr));
+        auto offset = static_cast<intptr_t>(JSValueToNumber(ctx, argv[5], nullptr));
+
+        glDrawRangeElements(mode, start, end, count, type, reinterpret_cast<const void*>(offset));
+        glFlush();
+        ReadbackToSharedTexture(c);
+
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_vertexAttribDivisor(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                       size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
+        glVertexAttribDivisor(
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[0], nullptr)),
+            static_cast<GLuint>(JSValueToNumber(ctx, argv[1], nullptr)));
+        return JSValueMakeUndefined(ctx);
+    }
+
+    // =========================================================================
+    // 3D Textures & Storage (WebGL2)
+    // =========================================================================
+
+    JSValueRef GL_texStorage2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 5) return JSValueMakeUndefined(ctx);
+        glTexStorage2D(
+            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+            static_cast<GLsizei>(JSValueToNumber(ctx, argv[1], nullptr)),
+            static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr)),
+            static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr)),
+            static_cast<GLsizei>(JSValueToNumber(ctx, argv[4], nullptr)));
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_texStorage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 6) return JSValueMakeUndefined(ctx);
+        glTexStorage3D(
+            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+            static_cast<GLsizei>(JSValueToNumber(ctx, argv[1], nullptr)),
+            static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr)),
+            static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr)),
+            static_cast<GLsizei>(JSValueToNumber(ctx, argv[4], nullptr)),
+            static_cast<GLsizei>(JSValueToNumber(ctx, argv[5], nullptr)));
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_texImage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                              size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 10) return JSValueMakeUndefined(ctx);
+        GLenum target = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
+        GLint level = static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr));
+        GLint internalformat = static_cast<GLint>(JSValueToNumber(ctx, argv[2], nullptr));
+        GLsizei width = static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr));
+        GLsizei height = static_cast<GLsizei>(JSValueToNumber(ctx, argv[4], nullptr));
+        GLsizei depth = static_cast<GLsizei>(JSValueToNumber(ctx, argv[5], nullptr));
+        GLint border = static_cast<GLint>(JSValueToNumber(ctx, argv[6], nullptr));
+        GLenum format = static_cast<GLenum>(JSValueToNumber(ctx, argv[7], nullptr));
+        GLenum type = static_cast<GLenum>(JSValueToNumber(ctx, argv[8], nullptr));
+
+        const void* data = nullptr;
+        if (argc > 9 && JSValueIsObject(ctx, argv[9]) &&
+            !JSValueIsNull(ctx, argv[9]) && !JSValueIsUndefined(ctx, argv[9])) {
+            JSObjectRef arr = JSValueToObject(ctx, argv[9], nullptr);
+            data = JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr);
+        }
+        glTexImage3D(target, level, internalformat, width, height, depth, border, format, type, data);
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_texSubImage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                 size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 11) return JSValueMakeUndefined(ctx);
+        GLenum target = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
+        GLint level = static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr));
+        GLint xoffset = static_cast<GLint>(JSValueToNumber(ctx, argv[2], nullptr));
+        GLint yoffset = static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr));
+        GLint zoffset = static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr));
+        GLsizei width = static_cast<GLsizei>(JSValueToNumber(ctx, argv[5], nullptr));
+        GLsizei height = static_cast<GLsizei>(JSValueToNumber(ctx, argv[6], nullptr));
+        GLsizei depth = static_cast<GLsizei>(JSValueToNumber(ctx, argv[7], nullptr));
+        GLenum format = static_cast<GLenum>(JSValueToNumber(ctx, argv[8], nullptr));
+        GLenum type = static_cast<GLenum>(JSValueToNumber(ctx, argv[9], nullptr));
+
+        const void* data = nullptr;
+        if (argc > 10 && JSValueIsObject(ctx, argv[10]) &&
+            !JSValueIsNull(ctx, argv[10]) && !JSValueIsUndefined(ctx, argv[10])) {
+            JSObjectRef arr = JSValueToObject(ctx, argv[10], nullptr);
+            data = JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr);
+        }
+        glTexSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, data);
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_copyTexSubImage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                     size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 9) return JSValueMakeUndefined(ctx);
+        glCopyTexSubImage3D(
+            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[2], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[5], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[6], nullptr)),
+            static_cast<GLsizei>(JSValueToNumber(ctx, argv[7], nullptr)),
+            static_cast<GLsizei>(JSValueToNumber(ctx, argv[8], nullptr)));
+        return JSValueMakeUndefined(ctx);
+    }
+
+    // =========================================================================
+    // Framebuffer Enhancements (WebGL2)
+    // =========================================================================
+
+    JSValueRef GL_drawBuffers(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                               size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 1) return JSValueMakeUndefined(ctx);
+
+        JSObjectRef arr = JSValueToObject(ctx, argv[0], nullptr);
+        if (!arr) return JSValueMakeUndefined(ctx);
+
+        JSStringRef lengthKey = JSStringCreateWithUTF8CString("length");
+        GLsizei count = static_cast<GLsizei>(
+            JSValueToNumber(ctx, JSObjectGetProperty(ctx, arr, lengthKey, nullptr), nullptr));
+        JSStringRelease(lengthKey);
+
+        std::vector<GLenum> bufs(count);
+        for (GLsizei i = 0; i < count; i++) {
+            JSValueRef elem = JSObjectGetPropertyAtIndex(ctx, arr, i, nullptr);
+            bufs[i] = static_cast<GLenum>(JSValueToNumber(ctx, elem, nullptr));
+        }
+        glDrawBuffers(count, bufs.data());
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_readBuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                              size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 1) return JSValueMakeUndefined(ctx);
+        glReadBuffer(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)));
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_blitFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                   size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 10) return JSValueMakeUndefined(ctx);
+        glBlitFramebuffer(
+            static_cast<GLint>(JSValueToNumber(ctx, argv[0], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[2], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[5], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[6], nullptr)),
+            static_cast<GLint>(JSValueToNumber(ctx, argv[7], nullptr)),
+            static_cast<GLbitfield>(JSValueToNumber(ctx, argv[8], nullptr)),
+            static_cast<GLenum>(JSValueToNumber(ctx, argv[9], nullptr)));
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_framebufferTextureLayer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                           size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 5) return JSValueMakeUndefined(ctx);
+        GLenum target = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
+        GLenum attachment = static_cast<GLenum>(JSValueToNumber(ctx, argv[1], nullptr));
+        GLuint texture = 0;
+        if (!JSValueIsNull(ctx, argv[2]) && !JSValueIsUndefined(ctx, argv[2]))
+            texture = GetGLId(ctx, argv[2]);
+        GLint level = static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr));
+        GLint layer = static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr));
+        glFramebufferTextureLayer(target, attachment, texture, level, layer);
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_renderbufferStorageMultisample(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                                  size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 5) return JSValueMakeUndefined(ctx);
+        glRenderbufferStorageMultisample(
+            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+            static_cast<GLsizei>(JSValueToNumber(ctx, argv[1], nullptr)),
+            static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr)),
+            static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr)),
+            static_cast<GLsizei>(JSValueToNumber(ctx, argv[4], nullptr)));
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_invalidateFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                         size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
+        GLenum target = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
+
+        JSObjectRef arr = JSValueToObject(ctx, argv[1], nullptr);
+        if (!arr) return JSValueMakeUndefined(ctx);
+
+        JSStringRef lengthKey = JSStringCreateWithUTF8CString("length");
+        GLsizei count = static_cast<GLsizei>(
+            JSValueToNumber(ctx, JSObjectGetProperty(ctx, arr, lengthKey, nullptr), nullptr));
+        JSStringRelease(lengthKey);
+
+        std::vector<GLenum> attachments(count);
+        for (GLsizei i = 0; i < count; i++) {
+            JSValueRef elem = JSObjectGetPropertyAtIndex(ctx, arr, i, nullptr);
+            attachments[i] = static_cast<GLenum>(JSValueToNumber(ctx, elem, nullptr));
+        }
+        glInvalidateFramebuffer(target, count, attachments.data());
+        return JSValueMakeUndefined(ctx);
+    }
+
+    JSValueRef GL_invalidateSubFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
+                                            size_t argc, const JSValueRef argv[], JSValueRef*) {
+        auto* c = GetContext(thisObject);
+        if (!c || !c->initialized || argc < 6) return JSValueMakeUndefined(ctx);
+        GLenum target = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
+
+        JSObjectRef arr = JSValueToObject(ctx, argv[1], nullptr);
+        if (!arr) return JSValueMakeUndefined(ctx);
+
+        JSStringRef lengthKey = JSStringCreateWithUTF8CString("length");
+        GLsizei count = static_cast<GLsizei>(
+            JSValueToNumber(ctx, JSObjectGetProperty(ctx, arr, lengthKey, nullptr), nullptr));
+        JSStringRelease(lengthKey);
+
+        std::vector<GLenum> attachments(count);
+        for (GLsizei i = 0; i < count; i++) {
+            JSValueRef elem = JSObjectGetPropertyAtIndex(ctx, arr, i, nullptr);
+            attachments[i] = static_cast<GLenum>(JSValueToNumber(ctx, elem, nullptr));
+        }
+
+        GLint x = static_cast<GLint>(JSValueToNumber(ctx, argv[2], nullptr));
+        GLint y = static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr));
+        GLsizei width = static_cast<GLsizei>(JSValueToNumber(ctx, argv[4], nullptr));
+        GLsizei height = static_cast<GLsizei>(JSValueToNumber(ctx, argv[5], nullptr));
+        glInvalidateSubFramebuffer(target, count, attachments.data(), x, y, width, height);
         return JSValueMakeUndefined(ctx);
     }
 

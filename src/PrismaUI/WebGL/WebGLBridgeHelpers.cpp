@@ -62,16 +62,27 @@ namespace PrismaUI::WebGL {
         std::vector<GLubyte> pixels(w * h * 4);
         glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
 
-        // Swizzle RGBA -> BGRA (glReadPixels gives RGBA, shared texture is B8G8R8A8)
-        for (size_t i = 0; i < pixels.size(); i += 4) {
-            std::swap(pixels[i], pixels[i + 2]);
+        // Swizzle RGBA -> BGRA and flip vertically.
+        // glReadPixels returns rows bottom-to-top (OpenGL convention) but
+        // D3D11 textures are top-to-bottom, so we must flip during the copy.
+        uint32_t rowBytes = w * 4;
+        std::vector<GLubyte> flipped(w * h * 4);
+        for (uint32_t row = 0; row < h; row++) {
+            GLubyte* src = pixels.data() + row * rowBytes;
+            GLubyte* dst = flipped.data() + (h - 1 - row) * rowBytes;
+            for (uint32_t i = 0; i < rowBytes; i += 4) {
+                dst[i + 0] = src[i + 2]; // B <- R
+                dst[i + 1] = src[i + 1]; // G
+                dst[i + 2] = src[i + 0]; // R <- B
+                dst[i + 3] = src[i + 3]; // A
+            }
         }
 
         ID3D11DeviceContext* d3dCtx = PrismaUI::Core::d3dContext;
         if (!d3dCtx) return;
 
         D3D11_BOX box = {0, 0, 0, w, h, 1};
-        d3dCtx->UpdateSubresource(c->sharedTexture.Get(), 0, &box, pixels.data(), w * 4, 0);
+        d3dCtx->UpdateSubresource(c->sharedTexture.Get(), 0, &box, flipped.data(), rowBytes, 0);
     }
 
     // =========================================================================

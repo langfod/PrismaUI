@@ -141,7 +141,7 @@ namespace PrismaUI::WebGL {
             EGL_ALPHA_SIZE, 8,
             EGL_DEPTH_SIZE, 24,
             EGL_STENCIL_SIZE, 8,
-            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
             EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
             EGL_NONE};
 
@@ -177,9 +177,9 @@ namespace PrismaUI::WebGL {
         }
         logger::info("[WebGL] Created pbuffer surface (ANGLE has its own D3D11 device)");
 
-        // Create an OpenGL ES 2.0 context
+        // Create an OpenGL ES 3.0 context
         const EGLint contextAttribs[] = {
-            EGL_CONTEXT_CLIENT_VERSION, 2,
+            EGL_CONTEXT_CLIENT_VERSION, 3,
             EGL_NONE};
 
         ctx->eglContext = eglCreateContext(g_ANGLEDisplay, ctx->eglConfig, EGL_NO_CONTEXT, contextAttribs);
@@ -204,6 +204,7 @@ namespace PrismaUI::WebGL {
         logger::info("[WebGL] Created WebGL context: {}x{}, GL_RENDERER={}", width, height,
                      reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
         logger::info("[WebGL] GL_VERSION={}", reinterpret_cast<const char*>(glGetString(GL_VERSION)));
+        logger::info("[WebGL] GL_EXTENSIONS={}", reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS)));
 
         return ctx;
     }

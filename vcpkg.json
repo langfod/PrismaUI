@@ -20,5 +20,6 @@
     },
     "directxmesh",
     "stb",
-    "abseil"  ]
+    "abseil"
+  ]
 }

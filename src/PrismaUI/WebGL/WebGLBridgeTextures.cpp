@@ -1,5 +1,6 @@
 #include "WebGLBridgeInternal.h"
 
+#include <spdlog/spdlog.h>
 #include <vector>
 
 namespace PrismaUI::WebGL {
@@ -95,7 +96,7 @@ namespace PrismaUI::WebGL {
                 JSObjectRef dataObj = JSValueToObject(ctx, argv[8], nullptr);
                 JSTypedArrayType arrType = JSValueGetTypedArrayType(ctx, argv[8], nullptr);
                 if (arrType != kJSTypedArrayTypeNone) {
-                    void* ptr = JSObjectGetTypedArrayBytesPtr(ctx, dataObj, nullptr);
+                    void* ptr = GetTypedArrayDataPtr(ctx, dataObj);
                     glTexImage2D(target, level, internalformat, width, height, 0, format, type, ptr);
                 } else {
                     glTexImage2D(target, level, internalformat, width, height, 0, format, type, nullptr);
@@ -122,10 +123,85 @@ namespace PrismaUI::WebGL {
         GLenum format = static_cast<GLenum>(JSValueToNumber(ctx, argv[6], nullptr));
         GLenum type = static_cast<GLenum>(JSValueToNumber(ctx, argv[7], nullptr));
 
+        static bool loggedFirstUpload = false;
+        if (!loggedFirstUpload) {
+            logger::info("[WebGL-DBG] GL_texSubImage2D: first upload {}x{} format=0x{:X} type=0x{:X}",
+                width, height, format, type);
+            loggedFirstUpload = true;
+        }
+
         if (argc > 8 && JSValueIsObject(ctx, argv[8]) && !JSValueIsNull(ctx, argv[8])) {
             JSObjectRef dataObj = JSValueToObject(ctx, argv[8], nullptr);
             void* ptr = JSObjectGetTypedArrayBytesPtr(ctx, dataObj, nullptr);
+            size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, dataObj, nullptr);
+
+            // Workaround: JSObjectGetTypedArrayBytesPtr in some JSC builds may
+            // return the ArrayBuffer base without adding the TypedArray's byte
+            // offset.  Detect this and correct the pointer if needed.
+            size_t taByteOffset = JSObjectGetTypedArrayByteOffset(ctx, dataObj, nullptr);
+            JSObjectRef backingAB = JSObjectGetTypedArrayBuffer(ctx, dataObj, nullptr);
+            void* abPtr = backingAB ? JSObjectGetArrayBufferBytesPtr(ctx, backingAB, nullptr) : nullptr;
+
+            if (abPtr && taByteOffset > 0 && ptr == abPtr) {
+                // Byte offset was NOT incorporated — fix it
+                ptr = static_cast<uint8_t*>(abPtr) + taByteOffset;
+                static bool loggedOffsetFix = false;
+                if (!loggedOffsetFix) {
+                    logger::info("[WebGL-DBG] texSubImage2D: fixed TypedArray ptr (ABbase={}, +offset={} -> {})",
+                        abPtr, taByteOffset, ptr);
+                    loggedOffsetFix = true;
+                }
+            }
+
+            // Log details of the first few uploads to diagnose data issues
+            static int uploadCount = 0;
+            uploadCount++;
+            if (uploadCount <= 5) {
+                auto* bytes = static_cast<uint8_t*>(ptr);
+                bool allZero = true;
+                uint8_t sample[4] = {};
+                if (ptr && byteLen >= 4) {
+                    // Sample from middle of data
+                    size_t mid = (byteLen / 2) & ~3;
+                    sample[0] = bytes[mid]; sample[1] = bytes[mid+1];
+                    sample[2] = bytes[mid+2]; sample[3] = bytes[mid+3];
+                    // Check ALL bytes, not just first 1024
+                    for (size_t i = 0; i < byteLen; i++) {
+                        if (bytes[i] != 0) { allZero = false; break; }
+                    }
+                }
+
+                // Also check directly from ArrayBuffer base + offset
+                bool abAllZero = true;
+                uint8_t abSample[4] = {};
+                if (abPtr && taByteOffset + byteLen <= JSObjectGetArrayBufferByteLength(ctx, backingAB, nullptr)) {
+                    auto* abBytes = static_cast<uint8_t*>(abPtr) + taByteOffset;
+                    size_t mid = (byteLen / 2) & ~3;
+                    abSample[0] = abBytes[mid]; abSample[1] = abBytes[mid+1];
+                    abSample[2] = abBytes[mid+2]; abSample[3] = abBytes[mid+3];
+                    for (size_t i = 0; i < byteLen && i < 4096; i++) {
+                        if (abBytes[i] != 0) { abAllZero = false; break; }
+                    }
+                }
+
+                logger::info("[WebGL-DBG] texSubImage2D #{}: TAptr={} TAbyteOff={} ABptr={} TAptr==AB+off? {} byteLen={} allZero={} mid=({},{},{},{}) AB+off_allZero={} AB+off_mid=({},{},{},{}) GL_err=0x{:X}",
+                    uploadCount, ptr, taByteOffset, abPtr,
+                    (ptr == static_cast<uint8_t*>(abPtr) + taByteOffset),
+                    byteLen, allZero,
+                    sample[0], sample[1], sample[2], sample[3],
+                    abAllZero,
+                    abSample[0], abSample[1], abSample[2], abSample[3],
+                    glGetError());
+            }
+
             glTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, ptr);
+
+            if (uploadCount <= 5) {
+                GLenum err = glGetError();
+                if (err != GL_NO_ERROR) {
+                    logger::warn("[WebGL-DBG] texSubImage2D #{}: GL error AFTER upload: 0x{:X}", uploadCount, err);
+                }
+            }
         }
         return JSValueMakeUndefined(ctx);
     }
@@ -174,7 +250,7 @@ namespace PrismaUI::WebGL {
         GLenum type = static_cast<GLenum>(JSValueToNumber(ctx, argv[5], nullptr));
         if (JSValueIsObject(ctx, argv[6]) && !JSValueIsNull(ctx, argv[6])) {
             JSObjectRef dataObj = JSValueToObject(ctx, argv[6], nullptr);
-            void* ptr = JSObjectGetTypedArrayBytesPtr(ctx, dataObj, nullptr);
+            void* ptr = GetTypedArrayDataPtr(ctx, dataObj);
             if (ptr) {
                 glReadPixels(x, y, width, height, format, type, ptr);
             }
@@ -300,6 +376,16 @@ namespace PrismaUI::WebGL {
                              size_t argc, const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 3) return JSValueMakeUndefined(ctx);
+
+        static bool loggedFirstDraw = false;
+        if (!loggedFirstDraw) {
+            logger::info("[WebGL-DBG] GL_drawArrays: first draw call (mode={}, first={}, count={})",
+                static_cast<int>(JSValueToNumber(ctx, argv[0], nullptr)),
+                static_cast<int>(JSValueToNumber(ctx, argv[1], nullptr)),
+                static_cast<int>(JSValueToNumber(ctx, argv[2], nullptr)));
+            loggedFirstDraw = true;
+        }
+
         glDrawArrays(
             static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
             static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
@@ -440,7 +526,7 @@ namespace PrismaUI::WebGL {
         if (argc > 9 && JSValueIsObject(ctx, argv[9]) &&
             !JSValueIsNull(ctx, argv[9]) && !JSValueIsUndefined(ctx, argv[9])) {
             JSObjectRef arr = JSValueToObject(ctx, argv[9], nullptr);
-            data = JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr);
+            data = GetTypedArrayDataPtr(ctx, arr);
         }
         glTexImage3D(target, level, internalformat, width, height, depth, border, format, type, data);
         return JSValueMakeUndefined(ctx);
@@ -465,7 +551,7 @@ namespace PrismaUI::WebGL {
         if (argc > 10 && JSValueIsObject(ctx, argv[10]) &&
             !JSValueIsNull(ctx, argv[10]) && !JSValueIsUndefined(ctx, argv[10])) {
             JSObjectRef arr = JSValueToObject(ctx, argv[10], nullptr);
-            data = JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr);
+            data = GetTypedArrayDataPtr(ctx, arr);
         }
         glTexSubImage3D(target, level, xoffset, yoffset, zoffset, width, height, depth, format, type, data);
         return JSValueMakeUndefined(ctx);

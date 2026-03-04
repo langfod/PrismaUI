@@ -24,6 +24,11 @@ namespace PrismaUI::WebGL {
         uint32_t canvasWidth = 0;
         uint32_t canvasHeight = 0;
 
+        // CSS display size of the canvas (may differ from buffer size when
+        // CSS scaling / object-fit is used).  Used for SpriteBatch overlay sizing.
+        float displayWidth = 0.0f;
+        float displayHeight = 0.0f;
+
         // Canvas position within the Ultralight view (set by JS shim each frame)
         float canvasX = 0.0f;
         float canvasY = 0.0f;

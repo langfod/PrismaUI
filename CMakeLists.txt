@@ -18,7 +18,7 @@ set(CMAKE_JOB_POOL_COMPILE compile)
 set(CMAKE_JOB_POOL_LINK link)
 set(CMAKE_INSTALL_MESSAGE LAZY)
 
-project(PrismaUI VERSION 1.4.1 LANGUAGES CXX)
+project(PrismaUI VERSION 1.4.2 LANGUAGES CXX)
 
 # Set build root for external builds
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
@@ -124,6 +124,9 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     unofficial::angle::libGLESv2
 )
 
+# Link WAMR for WebAssembly support (interpreter mode, fetched via cmake/wamr.cmake)
+add_wamr_dependencies(${PROJECT_NAME})
+
 # Delay-load Ultralight DLLs so they can be loaded from custom path at runtime
 target_link_options(${PROJECT_NAME}
     PRIVATE
@@ -189,4 +192,3 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     
     COMMAND "${CMAKE_COMMAND}" -E echo "Creating distribution folder: dist/PrismaUI_${PROJECT_VERSION}"
 )
-

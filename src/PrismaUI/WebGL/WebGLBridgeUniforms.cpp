@@ -18,7 +18,7 @@ namespace PrismaUI::WebGL {
         JSTypedArrayType arrType = JSValueGetTypedArrayType(ctx, val, nullptr);
         if (arrType != kJSTypedArrayTypeNone) {
             size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, obj, nullptr);
-            auto* ptr = static_cast<const T*>(JSObjectGetTypedArrayBytesPtr(ctx, obj, nullptr));
+            auto* ptr = static_cast<const T*>(GetTypedArrayDataPtr(ctx, obj));
             if (ptr && byteLen > 0) {
                 *directPtr = ptr;
                 return byteLen / sizeof(T);

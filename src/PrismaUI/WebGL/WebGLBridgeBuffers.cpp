@@ -50,7 +50,7 @@ namespace PrismaUI::WebGL {
             JSTypedArrayType arrType = JSValueGetTypedArrayType(ctx, argv[1], nullptr);
             if (arrType != kJSTypedArrayTypeNone) {
                 size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, dataObj, nullptr);
-                void* ptr = JSObjectGetTypedArrayBytesPtr(ctx, dataObj, nullptr);
+                void* ptr = GetTypedArrayDataPtr(ctx, dataObj);
                 glBufferData(target, static_cast<GLsizeiptr>(byteLen), ptr, usage);
             } else {
                 // Might be an ArrayBuffer
@@ -80,7 +80,7 @@ namespace PrismaUI::WebGL {
             JSTypedArrayType arrType = JSValueGetTypedArrayType(ctx, argv[2], nullptr);
             if (arrType != kJSTypedArrayTypeNone) {
                 size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, dataObj, nullptr);
-                void* ptr = JSObjectGetTypedArrayBytesPtr(ctx, dataObj, nullptr);
+                void* ptr = GetTypedArrayDataPtr(ctx, dataObj);
                 glBufferSubData(target, offset, static_cast<GLsizeiptr>(byteLen), ptr);
             }
         }
@@ -114,7 +114,7 @@ namespace PrismaUI::WebGL {
         if (!JSValueIsObject(ctx, argv[2])) return JSValueMakeUndefined(ctx);
         JSObjectRef dstData = JSValueToObject(ctx, argv[2], nullptr);
         size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, dstData, nullptr);
-        void* dstPtr = JSObjectGetTypedArrayBytesPtr(ctx, dstData, nullptr);
+        void* dstPtr = GetTypedArrayDataPtr(ctx, dstData);
         if (!dstPtr || byteLen == 0) return JSValueMakeUndefined(ctx);
 
         // GLES3 doesn't have glGetBufferSubData. Emulate with glMapBufferRange.

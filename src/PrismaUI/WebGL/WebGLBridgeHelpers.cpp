@@ -6,6 +6,7 @@
 #include <d3d11.h>
 #include <spdlog/spdlog.h>
 #include <vector>
+#include <chrono>
 
 namespace PrismaUI::WebGL {
 
@@ -54,7 +55,16 @@ namespace PrismaUI::WebGL {
     // (which lives on Skyrim's D3D11 device).
     // =========================================================================
     void ReadbackToSharedTexture(ANGLEContext* c) {
-        if (!c->sharedTexture) return;
+        if (!c->sharedTexture) {
+            static uint64_t lastLog = 0;
+            uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (now - lastLog > 5000) {
+                logger::debug("[WebGL-DBG] ReadbackToSharedTexture: sharedTexture is null");
+                lastLog = now;
+            }
+            return;
+        }
 
         uint32_t w = c->canvasWidth;
         uint32_t h = c->canvasHeight;
@@ -62,9 +72,35 @@ namespace PrismaUI::WebGL {
         std::vector<GLubyte> pixels(w * h * 4);
         glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
 
+        // Log the first readback's contents to diagnose garbled output
+        static bool loggedPixels = false;
+        if (!loggedPixels) {
+            loggedPixels = true;
+            // Check GL error after readPixels
+            GLenum err = glGetError();
+            logger::info("[WebGL-DBG] ReadbackToSharedTexture: glReadPixels {}x{} err=0x{:X}", w, h, err);
+            // Sample some pixels: top-left, center, and bottom-right
+            auto px = [&](uint32_t x, uint32_t y) -> std::string {
+                uint32_t idx = (y * w + x) * 4;
+                if (idx + 3 < pixels.size())
+                    return fmt::format("({},{},{},{})", pixels[idx], pixels[idx+1], pixels[idx+2], pixels[idx+3]);
+                return "(OOB)";
+            };
+            logger::info("[WebGL-DBG] Pixel samples: [0,0]={} [150,75]={} [299,149]={}",
+                px(0, 0), px(w/2, h/2), px(w-1, h-1));
+
+            // Check current framebuffer binding
+            GLint fbo = 0;
+            glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo);
+            logger::info("[WebGL-DBG] Current FBO at readback time: {}", fbo);
+        }
+
         // Swizzle RGBA -> BGRA and flip vertically.
         // glReadPixels returns rows bottom-to-top (OpenGL convention) but
         // D3D11 textures are top-to-bottom, so we must flip during the copy.
+        // Force alpha to 255: the default WebGL framebuffer is opaque, but
+        // ANGLE can return non-255 alpha values depending on the pbuffer
+        // surface configuration and blend state at clear/draw time.
         uint32_t rowBytes = w * 4;
         std::vector<GLubyte> flipped(w * h * 4);
         for (uint32_t row = 0; row < h; row++) {
@@ -74,15 +110,63 @@ namespace PrismaUI::WebGL {
                 dst[i + 0] = src[i + 2]; // B <- R
                 dst[i + 1] = src[i + 1]; // G
                 dst[i + 2] = src[i + 0]; // R <- B
-                dst[i + 3] = src[i + 3]; // A
+                dst[i + 3] = 255;        // Force opaque
             }
         }
 
         ID3D11DeviceContext* d3dCtx = PrismaUI::Core::d3dContext;
-        if (!d3dCtx) return;
+        if (!d3dCtx) {
+            static uint64_t lastLog = 0;
+            uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (now - lastLog > 5000) {
+                logger::debug("[WebGL-DBG] ReadbackToSharedTexture: d3dContext is null — pixels lost!");
+                lastLog = now;
+            }
+            return;
+        }
 
         D3D11_BOX box = {0, 0, 0, w, h, 1};
         d3dCtx->UpdateSubresource(c->sharedTexture.Get(), 0, &box, flipped.data(), rowBytes, 0);
+
+        // One-time log to confirm readback is working
+        static bool loggedOnce = false;
+        if (!loggedOnce) {
+            loggedOnce = true;
+            logger::info("[WebGL-DBG] ReadbackToSharedTexture: first successful readback {}x{}, rowPitch={}", w, h, rowBytes);
+
+            // Verify the shared texture dimensions match
+            D3D11_TEXTURE2D_DESC desc = {};
+            c->sharedTexture->GetDesc(&desc);
+            logger::info("[WebGL-DBG] SharedTexture desc: {}x{} format={} usage={} bindFlags=0x{:X}",
+                desc.Width, desc.Height, static_cast<int>(desc.Format),
+                static_cast<int>(desc.Usage), desc.BindFlags);
+
+            // Check a pixel in the flipped/swizzled buffer
+            if (flipped.size() >= 4) {
+                logger::info("[WebGL-DBG] Flipped buffer[0..3] (BGRA): {},{},{},{}",
+                    flipped[0], flipped[1], flipped[2], flipped[3]);
+            }
+
+            // Log GL viewport
+            GLint vp[4] = {};
+            glGetIntegerv(GL_VIEWPORT, vp);
+            logger::info("[WebGL-DBG] GL viewport: x={} y={} w={} h={}", vp[0], vp[1], vp[2], vp[3]);
+        }
+
+        // Second pixel check after several frames to verify real content
+        static int readbackCount = 0;
+        readbackCount++;
+        if (readbackCount == 30) {
+            auto px = [&](uint32_t px, uint32_t py) -> std::string {
+                uint32_t idx = (py * w + px) * 4;
+                if (idx + 3 < pixels.size())
+                    return fmt::format("({},{},{},{})", pixels[idx], pixels[idx+1], pixels[idx+2], pixels[idx+3]);
+                return "(OOB)";
+            };
+            logger::info("[WebGL-DBG] Readback frame 30 pixels (RGBA): [0,0]={} [80,72]={} [150,75]={}",
+                px(0, 0), px(80, 72), px(w/2, h/2));
+        }
     }
 
     // =========================================================================

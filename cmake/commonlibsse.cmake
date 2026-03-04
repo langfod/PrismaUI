@@ -14,7 +14,7 @@ message(STATUS "Configuring CommonLibSSE-NG version ${COMMONLIBSSE_VERSION}")
 set(_saved_build_type "${CMAKE_BUILD_TYPE}")
 
 # Always build CommonLibSSE in Release mode to disable assertions and enable optimizations
-set(CMAKE_BUILD_TYPE "Release")
+#set(CMAKE_BUILD_TYPE "Release")
 add_definitions(-D_CRT_SECURE_NO_WARNINGS)
 add_definitions(-DNDEBUG)
 

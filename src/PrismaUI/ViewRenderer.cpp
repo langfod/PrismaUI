@@ -390,24 +390,105 @@ namespace PrismaUI::ViewRenderer {
 
     void DrawWebGLOverlay(std::shared_ptr<Core::PrismaView> viewData) {
         if (!viewData) return;
-        if (!viewData->webglContext || !viewData->webglContext->initialized || !viewData->webglContext->sharedSRV)
+        if (!viewData->webglContext) {
+            static uint64_t lastNoCtxLog = 0;
+            uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (now - lastNoCtxLog > 5000) {
+                logger::debug("[WebGL-DBG] DrawWebGLOverlay: viewData->webglContext is null for view {}", viewData->id);
+                lastNoCtxLog = now;
+            }
             return;
+        }
+        if (!viewData->webglContext->initialized || !viewData->webglContext->sharedSRV) {
+            static uint64_t lastUninitLog = 0;
+            uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (now - lastUninitLog > 5000) {
+                logger::debug("[WebGL-DBG] DrawWebGLOverlay: context not ready (initialized={}, sharedSRV={})",
+                    viewData->webglContext->initialized,
+                    viewData->webglContext->sharedSRV != nullptr);
+                lastUninitLog = now;
+            }
+            return;
+        }
 
         auto* webgl = viewData->webglContext;
-        if (!webgl->visible) return;
+        if (!webgl->visible) {
+            static uint64_t lastVisLog = 0;
+            uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (now - lastVisLog > 5000) {
+                logger::debug("[WebGL-DBG] DrawWebGLOverlay: webgl->visible is false");
+                lastVisLog = now;
+            }
+            return;
+        }
 
         uint64_t nowMs = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now().time_since_epoch())
                 .count());
-        if (webgl->lastUpdateMs != 0 && nowMs - webgl->lastUpdateMs > 1500) return;
-        if (webgl->canvasWidth == 0 || webgl->canvasHeight == 0) return;
+        if (webgl->lastUpdateMs != 0 && nowMs - webgl->lastUpdateMs > 1500) {
+            static uint64_t lastStaleLog = 0;
+            if (nowMs - lastStaleLog > 5000) {
+                logger::debug("[WebGL-DBG] DrawWebGLOverlay: stale — lastUpdateMs={}, now={}, delta={}ms",
+                    webgl->lastUpdateMs, nowMs, nowMs - webgl->lastUpdateMs);
+                lastStaleLog = nowMs;
+            }
+            return;
+        }
+        if (webgl->canvasWidth == 0 || webgl->canvasHeight == 0) {
+            static uint64_t lastSizeLog = 0;
+            if (nowMs - lastSizeLog > 5000) {
+                logger::debug("[WebGL-DBG] DrawWebGLOverlay: canvas size is 0x0");
+                lastSizeLog = nowMs;
+            }
+            return;
+        }
+
+        static uint64_t lastDrawLog = 0;
+        static bool loggedViewport = false;
+        if (!loggedViewport) {
+            loggedViewport = true;
+            // Log the D3D11 viewport to understand coordinate mapping
+            D3D11_VIEWPORT vp = {};
+            UINT numVP = 1;
+            Core::d3dContext->RSGetViewports(&numVP, &vp);
+            logger::info("[WebGL-DBG] DrawWebGLOverlay: D3D viewport: ({},{}) {}x{} (topLeftX={}, topLeftY={})",
+                vp.TopLeftX, vp.TopLeftY, vp.Width, vp.Height, vp.TopLeftX, vp.TopLeftY);
+            logger::info("[WebGL-DBG] DrawWebGLOverlay: screenSize={}x{}", Core::screenSize.width, Core::screenSize.height);
+            logger::info("[WebGL-DBG] DrawWebGLOverlay: webgl pos=({},{}) bufSize={}x{} displaySize={}x{} sharedSRV={}",
+                webgl->canvasX, webgl->canvasY, webgl->canvasWidth, webgl->canvasHeight,
+                webgl->displayWidth, webgl->displayHeight,
+                static_cast<void*>(webgl->sharedSRV.Get()));
+        }
 
         DirectX::SimpleMath::Vector2 webglPos(webgl->canvasX, webgl->canvasY);
         RECT webglSourceRect = {0, 0, (long)webgl->canvasWidth, (long)webgl->canvasHeight};
 
+        // Compute scale factor: display size may differ from buffer size
+        // (e.g. CSS object-fit: contain scales a 300x150 canvas to fill the viewport).
+        float scaleX = 1.0f;
+        float scaleY = 1.0f;
+        if (webgl->displayWidth > 0 && webgl->displayHeight > 0 &&
+            webgl->canvasWidth > 0 && webgl->canvasHeight > 0) {
+            scaleX = webgl->displayWidth / static_cast<float>(webgl->canvasWidth);
+            scaleY = webgl->displayHeight / static_cast<float>(webgl->canvasHeight);
+        }
+
+        if (nowMs - lastDrawLog > 5000) {
+            logger::debug("[WebGL-DBG] DrawWebGLOverlay: DRAWING at ({},{}) buf {}x{} display {}x{} scale({:.2f},{:.2f}), lastUpdate={}ms ago",
+                webgl->canvasX, webgl->canvasY, webgl->canvasWidth, webgl->canvasHeight,
+                webgl->displayWidth, webgl->displayHeight, scaleX, scaleY,
+                nowMs - webgl->lastUpdateMs);
+            lastDrawLog = nowMs;
+        }
+
+        DirectX::SimpleMath::Vector2 scale(scaleX, scaleY);
+
         spriteBatch->Draw(webgl->sharedSRV.Get(), webglPos, &webglSourceRect,
-                          DirectX::Colors::White, 0.f, DirectX::SimpleMath::Vector2::Zero, 1.0f,
+                          DirectX::Colors::White, 0.f, DirectX::SimpleMath::Vector2::Zero, scale,
                           DirectX::SpriteEffects_None, 0.f);
     }
 }

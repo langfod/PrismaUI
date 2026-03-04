@@ -29,6 +29,26 @@ namespace PrismaUI::WebGL {
     std::string GetString(JSContextRef ctx, JSValueRef val);
     void ReadbackToSharedTexture(ANGLEContext* c);
 
+    // Safely get raw data pointer from a JSC TypedArray.
+    // Works around a JSC bug in some Ultralight builds where
+    // JSObjectGetTypedArrayBytesPtr may not include the byte offset
+    // for sub-views of ArrayBuffers.
+    inline void* GetTypedArrayDataPtr(JSContextRef ctx, JSObjectRef typedArray) {
+        void* ptr = JSObjectGetTypedArrayBytesPtr(ctx, typedArray, nullptr);
+        size_t off = JSObjectGetTypedArrayByteOffset(ctx, typedArray, nullptr);
+        if (off > 0) {
+            JSObjectRef ab = JSObjectGetTypedArrayBuffer(ctx, typedArray, nullptr);
+            if (ab) {
+                void* abBase = JSObjectGetArrayBufferBytesPtr(ctx, ab, nullptr);
+                if (abBase && ptr == abBase) {
+                    // Byte offset was not incorporated — fix it
+                    return static_cast<uint8_t*>(abBase) + off;
+                }
+            }
+        }
+        return ptr;
+    }
+
     // Helper to extract a float/int/uint array from either a TypedArray or a plain JS Array.
     // Returns the count of elements extracted.  Writes into 'out' up to 'maxCount' elements.
     // If the source is a TypedArray, sets *directPtr to the raw pointer and returns the

@@ -48,6 +48,10 @@ namespace PrismaUI::WebGL {
     struct ANGLEContext;
 }
 
+namespace PrismaUI::WASM {
+    struct WASMInstanceHandle;
+}
+
 namespace PrismaUI::Listeners {
     class MyLoadListener;
     class MyViewListener;
@@ -81,6 +85,10 @@ namespace PrismaUI::Core {
 
         // WebGL support
         WebGL::ANGLEContext* webglContext = nullptr;  // Non-null if view has an active WebGL canvas
+
+        // WASM support
+        // Tracks all live WASM instances for this view, cleaned up on view destroy.
+        std::unique_ptr<std::vector<WASM::WASMInstanceHandle>> wasmInstances;
 
         // Inspector rendering data
         // 32-byte aligned buffer for optimal SIMD performance

@@ -80,20 +80,67 @@
             rect = canvas.getBoundingClientRect();
         }
 
-        var x = rect.left || 0;
-        var y = rect.top || 0;
-        var w = canvas.width || rect.width || 0;
-        var h = canvas.height || rect.height || 0;
+        // Buffer size (ANGLE pbuffer dimensions) — always canvas.width/height
+        var w = canvas.width || 300;
+        var h = canvas.height || 150;
+
+        // CSS display size — what the user sees on screen.
+        // Priority: getBoundingClientRect > clientWidth/Height > inline style > canvas.width/height
+        var dw = rect.width || canvas.clientWidth || parseFloat(canvas.style.width) || w;
+        var dh = rect.height || canvas.clientHeight || parseFloat(canvas.style.height) || h;
+
         var visible = true;
 
-        if (__prismaIsHidden(canvas)) {
+        // In Ultralight iframes, getBoundingClientRect() may return all zeros
+        // when CSS layout hasn't resolved (e.g. percentage/flex sizing).
+        var hasCanvasAttribSize = (canvas.width > 0 && canvas.height > 0);
+        var rectResolved = (rect.width > 0 && rect.height > 0);
+
+        // Start with the canvas position within its document.
+        var x = rect.left || 0;
+        var y = rect.top || 0;
+
+        // Fallback: when getBoundingClientRect returns zeros, walk the
+        // offsetParent chain to compute position within the iframe document.
+        if (!rectResolved && canvas.offsetParent !== undefined) {
+            var el = canvas;
+            var ox = 0, oy = 0;
+            while (el) {
+                ox += (el.offsetLeft || 0);
+                oy += (el.offsetTop || 0);
+                el = el.offsetParent;
+            }
+            x = ox;
+            y = oy;
+        }
+
+        // Last-resort fallback: if position is still (0,0), try parsing
+        // inline style left/top (set by JS layoutCanvas when CSS layout
+        // doesn't produce offset values in Ultralight iframes).
+        if (x === 0 && y === 0) {
+            var sl = parseFloat(canvas.style.left);
+            var st = parseFloat(canvas.style.top);
+            if (sl > 0) x = sl;
+            if (st > 0) y = st;
+        }
+
+        // Debug: log all sources so we can diagnose position issues
+        if (!canvas.__prismaCanvasInfoLogged) {
+            canvas.__prismaCanvasInfoLogged = true;
+            console.log('[canvasInfo] rect=' + rect.left + ',' + rect.top + ',' + rect.width + ',' + rect.height +
+                        ' offset=' + canvas.offsetLeft + ',' + canvas.offsetTop +
+                        ' style=' + canvas.style.left + ',' + canvas.style.top + ',' + canvas.style.width + ',' + canvas.style.height +
+                        ' client=' + canvas.clientWidth + 'x' + canvas.clientHeight +
+                        ' attrib=' + canvas.width + 'x' + canvas.height +
+                        ' => x=' + x + ' y=' + y + ' dw=' + dw + ' dh=' + dh);
+        }
+
+        // Only run isHidden on the canvas if the CSS rect resolved.
+        if (rectResolved && __prismaIsHidden(canvas)) {
             visible = false;
         }
 
         // Walk the iframe chain to accumulate parent frame offsets.
-        // In cross-origin nested iframes, window.frameElement is null — use
-        // the pre-computed __prismaFrameOffsetX/Y injected by the C++ Strategy 3
-        // injection as a fallback.
         var win = canvas.ownerDocument && canvas.ownerDocument.defaultView;
         var walkedFrames = false;
         while (win && win.frameElement) {
@@ -104,8 +151,8 @@
             }
             if (typeof fe.getBoundingClientRect === 'function') {
                 var fr = fe.getBoundingClientRect();
-                x += fr.left || 0;
-                y += fr.top || 0;
+                x += (fr.left || 0) + (fe.clientLeft || 0);
+                y += (fr.top || 0) + (fe.clientTop || 0);
             }
             win = win.parent;
         }
@@ -121,11 +168,15 @@
             }
         }
 
-        if (w <= 0 || h <= 0 || rect.width === 0 || rect.height === 0) {
+        // Only treat as invisible when there is genuinely no size.
+        if (w <= 0 || h <= 0) {
+            visible = false;
+        }
+        if (!hasCanvasAttribSize && !rectResolved) {
             visible = false;
         }
 
-        return { x: x, y: y, w: w, h: h, visible: visible };
+        return { x: x, y: y, w: w, h: h, dw: dw, dh: dh, visible: visible };
     }
 
     function __prismaUpdateAllWebGL() {
@@ -135,7 +186,7 @@
             var ctx = window.__prismaWebGLContexts[i];
             if (!ctx || !ctx.canvas) continue;
             var info = __prismaComputeCanvasInfo(ctx.canvas);
-            __prismaUpdateWebGLContext(ctx, info.x, info.y, info.w, info.h, info.visible);
+            __prismaUpdateWebGLContext(ctx, info.x, info.y, info.w, info.h, info.visible, info.dw, info.dh);
         }
     }
 

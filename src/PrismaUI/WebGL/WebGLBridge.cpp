@@ -394,13 +394,37 @@ namespace PrismaUI::WebGL {
         uint32_t height = static_cast<uint32_t>(JSValueToNumber(ctx, argv[4], nullptr));
         bool visible = JSValueToBoolean(ctx, argv[5]);
 
+        // Optional display size args (argv[6], argv[7]) — CSS display dimensions.
+        // When the canvas CSS size differs from its buffer size (e.g. object-fit),
+        // the display size determines how large the overlay is drawn on screen.
+        float displayW = static_cast<float>(width);   // default: same as buffer
+        float displayH = static_cast<float>(height);
+        if (argc >= 8) {
+            float dw = static_cast<float>(JSValueToNumber(ctx, argv[6], nullptr));
+            float dh = static_cast<float>(JSValueToNumber(ctx, argv[7], nullptr));
+            if (dw > 0 && dh > 0) {
+                displayW = dw;
+                displayH = dh;
+            }
+        }
+
         angleCtx->canvasX = canvasX;
         angleCtx->canvasY = canvasY;
+        angleCtx->displayWidth = displayW;
+        angleCtx->displayHeight = displayH;
         angleCtx->visible = visible;
         angleCtx->lastUpdateMs = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now().time_since_epoch())
                 .count());
+
+        // One-time log to confirm the JS update loop is running
+        static bool loggedFirstUpdate = false;
+        if (!loggedFirstUpdate) {
+            logger::info("[WebGL-DBG] JS_UpdateWebGLContext: first update call — pos=({},{}) bufSize={}x{} displaySize={}x{} visible={}",
+                canvasX, canvasY, width, height, displayW, displayH, visible);
+            loggedFirstUpdate = true;
+        }
 
         if (width > 0 && height > 0 &&
             (width != angleCtx->canvasWidth || height != angleCtx->canvasHeight)) {

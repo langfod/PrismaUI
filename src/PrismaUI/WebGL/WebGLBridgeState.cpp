@@ -355,7 +355,7 @@ namespace PrismaUI::WebGL {
         GLint drawbuffer = static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr));
         if (JSValueIsObject(ctx, argv[2])) {
             JSObjectRef arr = JSValueToObject(ctx, argv[2], nullptr);
-            auto* ptr = static_cast<const GLint*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
+            auto* ptr = static_cast<const GLint*>(GetTypedArrayDataPtr(ctx, arr));
             if (ptr) glClearBufferiv(buffer, drawbuffer, ptr);
         }
         return JSValueMakeUndefined(ctx);
@@ -369,7 +369,7 @@ namespace PrismaUI::WebGL {
         GLint drawbuffer = static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr));
         if (JSValueIsObject(ctx, argv[2])) {
             JSObjectRef arr = JSValueToObject(ctx, argv[2], nullptr);
-            auto* ptr = static_cast<const GLuint*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
+            auto* ptr = static_cast<const GLuint*>(GetTypedArrayDataPtr(ctx, arr));
             if (ptr) glClearBufferuiv(buffer, drawbuffer, ptr);
         }
         return JSValueMakeUndefined(ctx);
@@ -383,7 +383,7 @@ namespace PrismaUI::WebGL {
         GLint drawbuffer = static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr));
         if (JSValueIsObject(ctx, argv[2])) {
             JSObjectRef arr = JSValueToObject(ctx, argv[2], nullptr);
-            auto* ptr = static_cast<const GLfloat*>(JSObjectGetTypedArrayBytesPtr(ctx, arr, nullptr));
+            auto* ptr = static_cast<const GLfloat*>(GetTypedArrayDataPtr(ctx, arr));
             if (ptr) glClearBufferfv(buffer, drawbuffer, ptr);
         }
         return JSValueMakeUndefined(ctx);

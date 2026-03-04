@@ -5,6 +5,7 @@
 #include "Inspector.h"
 #include "Listeners.h"
 #include "ViewOperationQueue.h"
+#include "WASM/WASMRuntime.h"
 #include "WebGL/ANGLEContext.h"
 
 namespace PrismaUI::ViewManager {
@@ -466,6 +467,16 @@ namespace PrismaUI::ViewManager {
                     logger::debug("Destroy: Releasing WebGL context for View [{}]", viewId);
                     WebGL::DestroyWebGLContext(viewData->webglContext);
                     viewData->webglContext = nullptr;
+                }
+
+                // Clean up WASM instances
+                if (viewData->wasmInstances) {
+                    logger::debug("Destroy: Releasing {} WASM instance(s) for View [{}]",
+                                  viewData->wasmInstances->size(), viewId);
+                    for (auto& inst : *viewData->wasmInstances) {
+                        WASM::DestroyInstance(inst);
+                    }
+                    viewData->wasmInstances.reset();
                 }
 
                 // Clean up inspector resources first

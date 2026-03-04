@@ -11,6 +11,7 @@
 #include "ViewManager.h"
 #include "ViewOperationQueue.h"
 #include "ViewRenderer.h"
+#include "WASM/WASMRuntime.h"
 #include "WebGL/ANGLEContext.h"
 #include "WebGL/WebGLBridge.h"
 
@@ -641,6 +642,10 @@ namespace PrismaUI::Core {
             std::unique_lock lock(viewsMutex);
             views.clear();
         }
+
+        // Force-shutdown WAMR runtime (safety net — individual instances cleaned up in Destroy)
+        WASM::ForceShutdownRuntime();
+
         if (renderer) {
             // Move renderer to the lambda so it's the sole owner,
             // ensuring release happens on the UI thread

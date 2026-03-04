@@ -3,6 +3,8 @@
 #include "Communication.h"
 #include "Core.h"
 #include "PrismaUI_API.h"
+#include "Stubs/WebAudioStub.h"
+#include "WASM/WASMBridge.h"
 #include "WebGL/WebGLBridge.h"
 #include "WebGL/WebGLShim.h"
 
@@ -28,9 +30,15 @@ namespace PrismaUI::Listeners {
         return result;
     }
 
-    // Helper: inject WebGL shim + native bindings into the main frame.
+    // Helper: inject browser API stubs + WebGL shim + native bindings into the main frame.
     // Also stores the shim source on window.__prismaShimSource for iframe propagation.
     static void InjectWebGLIntoMainFrame(View* caller, Core::PrismaViewId viewId) {
+        // Inject browser API stubs before any page scripts run
+        const char* audioStubJS = Stubs::GetWebAudioStubJS();
+        if (audioStubJS && audioStubJS[0]) {
+            caller->EvaluateScript(String(audioStubJS), nullptr, String(""));
+        }
+
         const auto& shimJS = WebGL::GetShimJS();
         if (!shimJS.empty()) {
             caller->EvaluateScript(String(shimJS.c_str()), nullptr, String(""));
@@ -45,6 +53,7 @@ namespace PrismaUI::Listeners {
         if (scoped_context) {
             JSContextRef ctx = (*scoped_context);
             WebGL::InjectWebGLBindings(ctx, viewId);
+            WASM::InjectWASMBindings(ctx, viewId);
         }
     }
 
@@ -133,6 +142,19 @@ namespace PrismaUI::Listeners {
                                 cw.__prismaShimSource = shimSrc;
                                 cw.__prismaFrameOffsetX = nx;
                                 cw.__prismaFrameOffsetY = ny;
+                                if (typeof WebAssembly !== 'undefined') {
+                                    cw.WebAssembly = WebAssembly;
+                                    if (typeof __prismaWASMResolve === 'function')
+                                        cw.__prismaWASMResolve = __prismaWASMResolve;
+                                    if (typeof __prismaWASMReject === 'function')
+                                        cw.__prismaWASMReject = __prismaWASMReject;
+                                }
+                                if (typeof AudioContext !== 'undefined')
+                                    cw.AudioContext = AudioContext;
+                                if (typeof webkitAudioContext !== 'undefined')
+                                    cw.webkitAudioContext = webkitAudioContext;
+                                if (typeof Audio !== 'undefined')
+                                    cw.Audio = Audio;
                                 cw.eval(shimSrc);
                                 return 'injected';
                             }

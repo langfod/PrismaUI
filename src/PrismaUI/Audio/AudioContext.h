@@ -48,7 +48,8 @@ namespace PrismaUI::Audio {
         IXAudio2* xaEngine = nullptr;                  // Owned — created via XAudio2Create()
         IXAudio2MasteringVoice* masterVoice = nullptr; // Owned — routes to default output device
 
-        AudioContextState state = AudioContextState::Suspended;
+        std::atomic<AudioContextState> state{AudioContextState::Suspended};
+        std::atomic<bool> destroying{false};
         float sampleRate = 48000.0f;
         std::atomic<double> currentTime_{0.0};  // Written by audio thread, read by JS thread
         uint64_t renderFrame = 0;   // Incremented each render batch for cycle detection

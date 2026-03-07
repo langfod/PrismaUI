@@ -60,7 +60,8 @@ namespace PrismaUI::Audio {
         float val = static_cast<float>(JSValueToNumber(ctx, argv[0], nullptr));
         double time = JSValueToNumber(ctx, argv[1], nullptr);
         p->ScheduleSetValueAtTime(val, time);
-        p->value.store(val, std::memory_order_relaxed);
+        // [008] Do NOT store val immediately — the scheduled event is the mechanism to change
+        // the current value; updating it here bypasses the timeline.
         return thisObj;
     }
 
@@ -95,8 +96,8 @@ namespace PrismaUI::Audio {
         return thisObj;
     }
 
-    static JSValueRef AudioParam_setValueCurveAtTime(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj,
-                                                      size_t, const JSValueRef[], JSValueRef*) {
+    static JSValueRef AudioParam_setValueCurveAtTime([[maybe_unused]] JSContextRef ctx, [[maybe_unused]] JSObjectRef, JSObjectRef thisObj,
+                                                      [[maybe_unused]] size_t, [[maybe_unused]] const JSValueRef[], [[maybe_unused]] JSValueRef*) {
         // Tier 2: not yet implemented
         return thisObj;
     }
@@ -130,17 +131,22 @@ namespace PrismaUI::Audio {
         {nullptr, nullptr, nullptr, 0}
     };
 
-    static JSClassRef g_AudioParamClass = nullptr;
+    // [001] Null private on GC; AudioParam is owned by the containing AudioNode, not JS GC.
+    static void AudioParamFinalize(JSObjectRef obj) {
+        JSObjectSetPrivate(obj, nullptr);
+    }
 
     JSClassRef GetAudioParamClass() {
-        if (!g_AudioParamClass) {
+        // [009] Magic-static for thread-safe one-time init
+        static JSClassRef cls = []() {
             JSClassDefinition classDef{};
             classDef.className = "AudioParam";
             classDef.staticFunctions = kAudioParamFunctions;
             classDef.staticValues = kAudioParamValues;
-            g_AudioParamClass = JSClassCreate(&classDef);
-        }
-        return g_AudioParamClass;
+            classDef.finalize = AudioParamFinalize;
+            return JSClassCreate(&classDef);
+        }();
+        return cls;
     }
 
 }  // namespace PrismaUI::Audio

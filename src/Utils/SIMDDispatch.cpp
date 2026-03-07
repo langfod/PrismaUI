@@ -1,11 +1,16 @@
 #include "SIMDDispatch.h"
 
+#include <cassert>
+#include <atomic>
 #include <cpuinfo.h>
 #include <cstring>
 
 namespace PrismaUI::SIMD {
 
     static InstructionSet g_ActiveInstructionSet = InstructionSet::None;
+    // [095] Guard: set to true at the end of Initialize(). DEBUG asserts in each
+    // Generic:: dispatcher catch callers that skip Initialize() entirely.
+    static std::atomic<bool> g_simdInitialized{false};
 
     // ============================================================
     // Forward declarations of implementation variants
@@ -64,6 +69,7 @@ namespace PrismaUI::SIMD {
             CopyPixels = Generic::CopyPixels;
             FastMemcpy = Generic::FastMemcpy;
             SwizzleFlipPixels = Generic::SwizzleFlipPixels;
+            g_simdInitialized.store(true, std::memory_order_release);
             return;
         }
 
@@ -98,6 +104,8 @@ namespace PrismaUI::SIMD {
             SwizzleFlipPixels = Generic::SwizzleFlipPixels;
             logger::warn("SIMDDispatch: No SIMD support detected, using generic implementations");
         }
+
+        g_simdInitialized.store(true, std::memory_order_release);
     }
 
     InstructionSet GetActiveInstructionSet() { return g_ActiveInstructionSet; }
@@ -125,6 +133,8 @@ namespace PrismaUI::SIMD {
         void CopyPixels(void* dest, uint32_t destPitch, const void* src, uint32_t srcPitch, uint32_t width,
                         uint32_t height) {
 #ifdef _DEBUG
+            assert(g_simdInitialized.load(std::memory_order_acquire) &&
+                   "SIMD::Initialize() must be called before using SIMD functions");
             // Verify alignment in debug builds (helps catch issues early)
             const uintptr_t destAddr = reinterpret_cast<uintptr_t>(dest);
             const uintptr_t srcAddr = reinterpret_cast<uintptr_t>(src);
@@ -152,6 +162,8 @@ namespace PrismaUI::SIMD {
 
         void FastMemcpy(void* dest, const void* src, size_t size) {
 #ifdef _DEBUG
+            assert(g_simdInitialized.load(std::memory_order_acquire) &&
+                   "SIMD::Initialize() must be called before using SIMD functions");
             // Verify alignment in debug builds
             const uintptr_t destAddr = reinterpret_cast<uintptr_t>(dest);
             const uintptr_t srcAddr = reinterpret_cast<uintptr_t>(src);
@@ -165,13 +177,19 @@ namespace PrismaUI::SIMD {
         }
 
         void SwizzleFlipPixels(void* dest, const void* src, uint32_t width, uint32_t height) {
-            const uint32_t rowBytes = width * 4;
+            // [096] In-place operation corrupts data (top rows overwritten before read).
+            assert(dest != src && "SwizzleFlipPixels does not support in-place operation");
+#ifdef _DEBUG
+            assert(g_simdInitialized.load(std::memory_order_acquire) &&
+                   "SIMD::Initialize() must be called before using SIMD functions");
+#endif
+            const size_t rowBytes = static_cast<size_t>(width) * 4;
             auto* srcBytes = static_cast<const uint8_t*>(src);
             auto* dstBytes = static_cast<uint8_t*>(dest);
             for (uint32_t row = 0; row < height; row++) {
-                const uint8_t* srcRow = srcBytes + row * rowBytes;
-                uint8_t* dstRow = dstBytes + (height - 1 - row) * rowBytes;
-                for (uint32_t i = 0; i < rowBytes; i += 4) {
+                const uint8_t* srcRow = srcBytes + static_cast<size_t>(row) * rowBytes;
+                uint8_t* dstRow = dstBytes + static_cast<size_t>(height - 1 - row) * rowBytes;
+                for (size_t i = 0; i < rowBytes; i += 4) {
                     dstRow[i + 0] = srcRow[i + 2]; // B <- R
                     dstRow[i + 1] = srcRow[i + 1]; // G
                     dstRow[i + 2] = srcRow[i + 0]; // R <- B

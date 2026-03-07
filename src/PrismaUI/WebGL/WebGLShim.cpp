@@ -9,24 +9,20 @@
 namespace PrismaUI::WebGL {
 
     const std::string& GetShimJS() {
-        static std::string cachedShimJS;
-        static bool loaded = false;
-
-        if (!loaded) {
-            loaded = true;
+        static const std::string s = []() -> std::string {
             auto shimPath = Utils::GetBasePath() / "misc" / "webgl_shim.js";
             std::ifstream file(shimPath, std::ios::in | std::ios::binary);
             if (file.is_open()) {
                 std::ostringstream ss;
                 ss << file.rdbuf();
-                cachedShimJS = ss.str();
-                logger::info("[WebGL] Loaded shim JS from: {} ({} bytes)", shimPath.string(), cachedShimJS.size());
-            } else {
-                logger::error("[WebGL] Failed to load shim JS from: {}", shimPath.string());
+                std::string result = ss.str();
+                logger::info("[WebGL] Loaded shim JS from: {} ({} bytes)", shimPath.string(), result.size());
+                return result;
             }
-        }
-
-        return cachedShimJS;
+            logger::error("[WebGL] Failed to load shim JS from: {}", shimPath.string());
+            return {};
+        }();
+        return s;
     }
 
 }  // namespace PrismaUI::WebGL

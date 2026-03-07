@@ -1,6 +1,7 @@
 // This file is compiled with SSE2 instructions (baseline x86_64)
 #include "SIMDDispatch.h"
 
+#include <cassert>
 #include <emmintrin.h>  // SSE2
 #include <tmmintrin.h>  // SSSE3 for _mm_shuffle_epi8 (used by SwizzleFlipPixels)
 #include <cstring>
@@ -62,7 +63,9 @@ namespace PrismaUI::SIMD::SSE2 {
     // SSSE3 RGBA->BGRA swizzle + vertical flip.
     // Runtime dispatch only selects this when SSSE3 is confirmed available.
     void SwizzleFlipPixels(void* dest, const void* src, uint32_t width, uint32_t height) {
-        const uint32_t rowBytes = width * 4;
+        // [096] In-place operation corrupts data (top rows overwritten before read).
+        assert(dest != src && "SwizzleFlipPixels does not support in-place operation");
+        const size_t rowBytes = static_cast<size_t>(width) * 4;
         auto* srcBytes = static_cast<const uint8_t*>(src);
         auto* dstBytes = static_cast<uint8_t*>(dest);
 
@@ -74,10 +77,10 @@ namespace PrismaUI::SIMD::SSE2 {
             -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0);
 
         for (uint32_t row = 0; row < height; row++) {
-            const uint8_t* srcRow = srcBytes + row * rowBytes;
-            uint8_t* dstRow = dstBytes + (height - 1 - row) * rowBytes;
+            const uint8_t* srcRow = srcBytes + static_cast<size_t>(row) * rowBytes;
+            uint8_t* dstRow = dstBytes + static_cast<size_t>(height - 1 - row) * rowBytes;
 
-            uint32_t i = 0;
+            size_t i = 0;
             for (; i + 16 <= rowBytes; i += 16) {
                 __m128i px = _mm_loadu_si128(reinterpret_cast<const __m128i*>(srcRow + i));
                 px = _mm_shuffle_epi8(px, shuffleMask);

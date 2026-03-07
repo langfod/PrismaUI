@@ -279,6 +279,9 @@
         this._gainNode = null;
         this._loaded = false;
         this._loading = false;
+        this._ctx = null;
+        this._playbackOffset = 0;
+        this._playbackStartedAt = 0;
     }
 
     Object.defineProperty(PrismaAudio.prototype, 'volume', {
@@ -356,14 +359,20 @@
         this._source.connect(this._gainNode);
         this._gainNode.connect(ctx.destination);
 
+        this._ctx = ctx;
+        this._playbackOffset = this.currentTime;
+
         var self = this;
         this._source.onended = function() {
             self.ended = true;
             self.paused = true;
+            self._playbackStartedAt = 0;
+            self.currentTime = 0;
             self._emit('ended');
         };
 
         this._source.start(0, this.currentTime);
+        this._playbackStartedAt = ctx.currentTime;
         this.paused = false;
         this.ended = false;
     };
@@ -398,6 +407,10 @@
 
     PrismaAudio.prototype.pause = function() {
         if (this._source) {
+            if (this._playbackStartedAt > 0 && this._ctx) {
+                this.currentTime = this._playbackOffset + (this._ctx.currentTime - this._playbackStartedAt);
+            }
+            this._playbackStartedAt = 0;
             try { this._source.stop(); } catch(e) {}
             this._source = null;
         }

@@ -61,7 +61,13 @@ namespace PrismaUI::WASM {
     static void HostFuncTrampoline(wasm_exec_env_t execEnv, uint64_t* args) {
         void* attachment = wasm_runtime_get_function_attachment(execEnv);
         auto* td = static_cast<ImportContext::TrampolineData*>(attachment);
-        if (!td || !td->jsFunc) return;
+        if (!td || !td->jsFunc) {
+            // [058] Prevent WAMR reading an uninitialized return slot
+            args[0] = 0;
+            wasm_module_inst_t mi = wasm_runtime_get_module_inst(execEnv);
+            if (mi) wasm_runtime_set_exception(mi, "import function not found");
+            return;
+        }
 
         JSContextRef ctx = td->ctx;
 
@@ -341,6 +347,9 @@ namespace PrismaUI::WASM {
             if (!ok) {
                 std::string errMsg = "WebAssembly.Instance: failed to register native imports for module '" + modSyms.moduleName + "'";
                 logger::error("[WASM] {}", errMsg);
+
+                // [059] Clean up all protects and previous registrations before failing
+                CleanupImports(outCtx);
 
                 JSStringRef errStr = JSStringCreateWithUTF8CString(errMsg.c_str());
                 JSValueRef errVal = JSValueMakeString(ctx, errStr);

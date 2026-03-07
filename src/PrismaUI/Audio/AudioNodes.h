@@ -32,18 +32,18 @@ namespace PrismaUI::Audio {
 
     // ---- AudioBufferSourceNode ----
     struct AudioBufferSourceNode : AudioNode {
-        AudioBuffer* buffer = nullptr;
-        bool loop = false;
-        double loopStart = 0.0;
-        double loopEnd = 0.0;
+        std::atomic<AudioBuffer*> buffer{nullptr};  // JS-thread write, audio-thread read
+        std::atomic<bool> loop{false};
+        std::atomic<double> loopStart{0.0};
+        std::atomic<double> loopEnd{0.0};
         AudioParam playbackRate{1.0f};
 
         std::atomic<bool> started{false};
         std::atomic<bool> ended{false};
-        double startTime = 0.0;
-        double stopTime = -1.0;   // Negative means no stop scheduled
-        double startOffset = 0.0; // Offset into buffer (seconds) for start
-        uint64_t playbackPosition = 0;
+        std::atomic<double> startTime{0.0};
+        std::atomic<double> stopTime{-1.0};  // Negative means no stop scheduled
+        double startOffset = 0.0;            // Only used in Start(), guarded by started fence
+        uint64_t playbackPosition = 0;       // Audio-thread-only after Start()
 
         AudioBufferSourceNode() { type = Type::BufferSource; }
 

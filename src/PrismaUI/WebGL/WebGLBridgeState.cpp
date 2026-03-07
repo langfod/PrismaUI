@@ -357,9 +357,11 @@ namespace PrismaUI::WebGL {
         if (JSValueIsObject(ctx, argv[2])) {
             JSObjectRef arr = JSValueToObject(ctx, argv[2], nullptr);
             auto* ptr = static_cast<const GLint*>(GetTypedArrayDataPtr(ctx, arr));
-            if (ptr) glClearBufferiv(buffer, drawbuffer, ptr);
+            if (ptr) {
+                glClearBufferiv(buffer, drawbuffer, ptr);
+                c->frameDirty = true;
+            }
         }
-        c->frameDirty = true;
         return JSValueMakeUndefined(ctx);
     }
 
@@ -372,9 +374,11 @@ namespace PrismaUI::WebGL {
         if (JSValueIsObject(ctx, argv[2])) {
             JSObjectRef arr = JSValueToObject(ctx, argv[2], nullptr);
             auto* ptr = static_cast<const GLuint*>(GetTypedArrayDataPtr(ctx, arr));
-            if (ptr) glClearBufferuiv(buffer, drawbuffer, ptr);
+            if (ptr) {
+                glClearBufferuiv(buffer, drawbuffer, ptr);
+                c->frameDirty = true;
+            }
         }
-        c->frameDirty = true;
         return JSValueMakeUndefined(ctx);
     }
 
@@ -387,9 +391,11 @@ namespace PrismaUI::WebGL {
         if (JSValueIsObject(ctx, argv[2])) {
             JSObjectRef arr = JSValueToObject(ctx, argv[2], nullptr);
             auto* ptr = static_cast<const GLfloat*>(GetTypedArrayDataPtr(ctx, arr));
-            if (ptr) glClearBufferfv(buffer, drawbuffer, ptr);
+            if (ptr) {
+                glClearBufferfv(buffer, drawbuffer, ptr);
+                c->frameDirty = true;
+            }
         }
-        c->frameDirty = true;
         return JSValueMakeUndefined(ctx);
     }
 
@@ -599,11 +605,14 @@ namespace PrismaUI::WebGL {
         GLuint program = GetGLId(ctx, argv[0]);
         GLuint index = static_cast<GLuint>(JSValueToNumber(ctx, argv[1], nullptr));
 
-        GLchar name[256];
+        GLint maxLen = 0;
+        glGetProgramiv(program, GL_TRANSFORM_FEEDBACK_VARYING_MAX_LENGTH, &maxLen);
+        if (maxLen < 1) maxLen = 1;
+        std::vector<GLchar> name(maxLen);
         GLsizei len = 0;
         GLsizei size = 0;
         GLenum type = 0;
-        glGetTransformFeedbackVarying(program, index, sizeof(name), &len, &size, &type, name);
+        glGetTransformFeedbackVarying(program, index, maxLen, &len, &size, &type, name.data());
 
         // Return WebGLActiveInfo-like object
         JSObjectRef obj = JSObjectMake(ctx, nullptr, nullptr);
@@ -612,7 +621,7 @@ namespace PrismaUI::WebGL {
         JSStringRef nameKey = JSStringCreateWithUTF8CString("name");
         JSObjectSetProperty(ctx, obj, sizeKey, JSValueMakeNumber(ctx, size), 0, nullptr);
         JSObjectSetProperty(ctx, obj, typeKey, JSValueMakeNumber(ctx, type), 0, nullptr);
-        JSStringRef nameVal = JSStringCreateWithUTF8CString(name);
+        JSStringRef nameVal = JSStringCreateWithUTF8CString(name.data());
         JSObjectSetProperty(ctx, obj, nameKey, JSValueMakeString(ctx, nameVal), 0, nullptr);
         JSStringRelease(sizeKey); JSStringRelease(typeKey); JSStringRelease(nameKey); JSStringRelease(nameVal);
         return obj;
@@ -796,8 +805,9 @@ namespace PrismaUI::WebGL {
         GLbitfield flags = static_cast<GLbitfield>(JSValueToNumber(ctx, argv[1], nullptr));
         GLsync sync = glFenceSync(condition, flags);
         if (!sync) return JSValueMakeNull(ctx);
-        // Store sync pointer as uintptr_t in _id
-        return MakeGLObject(ctx, "WebGLSync", static_cast<GLuint>(reinterpret_cast<uintptr_t>(sync)));
+        uint32_t id = c->nextSyncId.fetch_add(1);
+        c->syncObjects[id] = sync;
+        return MakeGLObject(ctx, "WebGLSync", id);
     }
 
     JSValueRef GL_isSync(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
@@ -805,8 +815,9 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 1) return JSValueMakeBoolean(ctx, false);
         GLuint id = GetGLId(ctx, argv[0]);
-        GLsync sync = reinterpret_cast<GLsync>(static_cast<uintptr_t>(id));
-        return JSValueMakeBoolean(ctx, glIsSync(sync) == GL_TRUE);
+        auto it = c->syncObjects.find(id);
+        if (it == c->syncObjects.end()) return JSValueMakeBoolean(ctx, false);
+        return JSValueMakeBoolean(ctx, glIsSync(it->second) == GL_TRUE);
     }
 
     JSValueRef GL_deleteSync(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
@@ -815,8 +826,11 @@ namespace PrismaUI::WebGL {
         if (!c || !c->initialized || argc < 1) return JSValueMakeUndefined(ctx);
         GLuint id = GetGLId(ctx, argv[0]);
         if (id) {
-            GLsync sync = reinterpret_cast<GLsync>(static_cast<uintptr_t>(id));
-            glDeleteSync(sync);
+            auto it = c->syncObjects.find(id);
+            if (it != c->syncObjects.end()) {
+                glDeleteSync(it->second);
+                c->syncObjects.erase(it);
+            }
         }
         return JSValueMakeUndefined(ctx);
     }
@@ -826,10 +840,11 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 3) return JSValueMakeNumber(ctx, GL_WAIT_FAILED);
         GLuint id = GetGLId(ctx, argv[0]);
-        GLsync sync = reinterpret_cast<GLsync>(static_cast<uintptr_t>(id));
+        auto syncIt = c->syncObjects.find(id);
+        if (syncIt == c->syncObjects.end()) return JSValueMakeNumber(ctx, GL_WAIT_FAILED);
         GLbitfield flags = static_cast<GLbitfield>(JSValueToNumber(ctx, argv[1], nullptr));
         GLuint64 timeout = static_cast<GLuint64>(JSValueToNumber(ctx, argv[2], nullptr));
-        GLenum result = glClientWaitSync(sync, flags, timeout);
+        GLenum result = glClientWaitSync(syncIt->second, flags, timeout);
         return JSValueMakeNumber(ctx, static_cast<double>(result));
     }
 
@@ -838,10 +853,11 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 3) return JSValueMakeUndefined(ctx);
         GLuint id = GetGLId(ctx, argv[0]);
-        GLsync sync = reinterpret_cast<GLsync>(static_cast<uintptr_t>(id));
+        auto syncIt = c->syncObjects.find(id);
+        if (syncIt == c->syncObjects.end()) return JSValueMakeUndefined(ctx);
         GLbitfield flags = static_cast<GLbitfield>(JSValueToNumber(ctx, argv[1], nullptr));
         GLuint64 timeout = static_cast<GLuint64>(JSValueToNumber(ctx, argv[2], nullptr));
-        glWaitSync(sync, flags, timeout);
+        glWaitSync(syncIt->second, flags, timeout);
         return JSValueMakeUndefined(ctx);
     }
 
@@ -850,11 +866,12 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeNull(ctx);
         GLuint id = GetGLId(ctx, argv[0]);
-        GLsync sync = reinterpret_cast<GLsync>(static_cast<uintptr_t>(id));
+        auto syncIt = c->syncObjects.find(id);
+        if (syncIt == c->syncObjects.end()) return JSValueMakeNull(ctx);
         GLenum pname = static_cast<GLenum>(JSValueToNumber(ctx, argv[1], nullptr));
         GLint val = 0;
         GLsizei len = 0;
-        glGetSynciv(sync, pname, 1, &len, &val);
+        glGetSynciv(syncIt->second, pname, 1, &len, &val);
         return JSValueMakeNumber(ctx, static_cast<double>(val));
     }
 

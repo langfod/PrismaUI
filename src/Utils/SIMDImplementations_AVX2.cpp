@@ -1,6 +1,7 @@
 // This file is compiled with AVX2 instructions
 #include "SIMDDispatch.h"
 
+#include <cassert>
 #include <immintrin.h>  // AVX2
 #include <cstring>
 
@@ -60,7 +61,9 @@ namespace PrismaUI::SIMD::AVX2 {
     }
 
     void SwizzleFlipPixels(void* dest, const void* src, uint32_t width, uint32_t height) {
-        const uint32_t rowBytes = width * 4;
+        // [096] In-place operation corrupts data (top rows overwritten before read).
+        assert(dest != src && "SwizzleFlipPixels does not support in-place operation");
+        const size_t rowBytes = static_cast<size_t>(width) * 4;
         auto* srcBytes = static_cast<const uint8_t*>(src);
         auto* dstBytes = static_cast<uint8_t*>(dest);
 
@@ -73,10 +76,10 @@ namespace PrismaUI::SIMD::AVX2 {
             -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0);
 
         for (uint32_t row = 0; row < height; row++) {
-            const uint8_t* srcRow = srcBytes + row * rowBytes;
-            uint8_t* dstRow = dstBytes + (height - 1 - row) * rowBytes;
+            const uint8_t* srcRow = srcBytes + static_cast<size_t>(row) * rowBytes;
+            uint8_t* dstRow = dstBytes + static_cast<size_t>(height - 1 - row) * rowBytes;
 
-            uint32_t i = 0;
+            size_t i = 0;
             for (; i + 32 <= rowBytes; i += 32) {
                 __m256i px = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(srcRow + i));
                 px = _mm256_shuffle_epi8(px, shuffleMask);

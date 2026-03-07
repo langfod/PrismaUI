@@ -345,7 +345,7 @@ namespace PrismaUI::WebGL {
 
         if (name == "WEBGL_multisampled_render_to_texture") {
             JSObjectRef ext = JSObjectMake(ctx, nullptr, nullptr);
-            SetNumericProperty(ctx, ext, "FRAMEBUFFER_ATTACHMENT_TEXTURE_NUM_VIEWS_OVR", 0x9630);
+            SetNumericProperty(ctx, ext, "FRAMEBUFFER_ATTACHMENT_TEXTURE_SAMPLES_EXT", 0x8D6C);
             // TODO: needs framebufferTexture2DMultisampleEXT function binding
             return ext;
         }
@@ -429,11 +429,14 @@ namespace PrismaUI::WebGL {
         if (!c || !c->initialized || argc < 2) return JSValueMakeNull(ctx);
         GLuint prog = GetGLId(ctx, argv[0]);
         GLuint index = static_cast<GLuint>(JSValueToNumber(ctx, argv[1], nullptr));
-        GLchar name[256];
+        GLint maxLen = 0;
+        glGetProgramiv(prog, GL_ACTIVE_ATTRIBUTE_MAX_LENGTH, &maxLen);
+        if (maxLen < 1) maxLen = 1;
+        std::vector<GLchar> name(maxLen);
         GLsizei len = 0;
         GLint size = 0;
         GLenum type = 0;
-        glGetActiveAttrib(prog, index, sizeof(name), &len, &size, &type, name);
+        glGetActiveAttrib(prog, index, maxLen, &len, &size, &type, name.data());
         // Return WebGLActiveInfo-like object
         JSObjectRef obj = JSObjectMake(ctx, nullptr, nullptr);
         JSStringRef sizeKey = JSStringCreateWithUTF8CString("size");
@@ -441,7 +444,7 @@ namespace PrismaUI::WebGL {
         JSStringRef nameKey = JSStringCreateWithUTF8CString("name");
         JSObjectSetProperty(ctx, obj, sizeKey, JSValueMakeNumber(ctx, size), 0, nullptr);
         JSObjectSetProperty(ctx, obj, typeKey, JSValueMakeNumber(ctx, type), 0, nullptr);
-        JSStringRef nameVal = JSStringCreateWithUTF8CString(name);
+        JSStringRef nameVal = JSStringCreateWithUTF8CString(name.data());
         JSObjectSetProperty(ctx, obj, nameKey, JSValueMakeString(ctx, nameVal), 0, nullptr);
         JSStringRelease(sizeKey); JSStringRelease(typeKey); JSStringRelease(nameKey); JSStringRelease(nameVal);
         return obj;
@@ -658,7 +661,7 @@ namespace PrismaUI::WebGL {
             GLenum type = 0;
             glGetActiveUniform(prog, i, sizeof(name), &len, &size, &type, name);
             GLint uLoc = glGetUniformLocation(prog, name);
-            if (uLoc == loc) {
+            if (uLoc != -1 && loc >= uLoc && loc < uLoc + size) {
                 uniformType = type;
                 break;
             }
@@ -996,9 +999,9 @@ namespace PrismaUI::WebGL {
             case GL_TRANSFORM_FEEDBACK_BUFFER_START:
             case GL_UNIFORM_BUFFER_SIZE:
             case GL_UNIFORM_BUFFER_START: {
-                GLint val = 0;
-                glGetIntegeri_v(target, index, &val);
-                return JSValueMakeNumber(ctx, static_cast<double>(val));
+                GLint64 val64 = 0;
+                glGetInteger64i_v(target, index, &val64);
+                return JSValueMakeNumber(ctx, static_cast<double>(val64));
             }
             default: {
                 GLint val = 0;

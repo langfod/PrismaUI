@@ -1,4 +1,5 @@
 #pragma once
+#include <cstdint>
 #include <malloc.h>
 #include <new>
 #include <type_traits>

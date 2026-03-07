@@ -39,7 +39,6 @@ namespace PrismaUI::Inspector {
 
         const void* pixels = bitmap->LockPixels();
         if (!pixels) {
-            bitmap->UnlockPixels();
             return;
         }
 

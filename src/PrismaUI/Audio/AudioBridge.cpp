@@ -59,7 +59,7 @@ namespace PrismaUI::Audio {
             return v;
         }
         const char* stateStr = "suspended";
-        switch (ac->state) {
+        switch (ac->state.load(std::memory_order_acquire)) {
             case AudioContextState::Running:   stateStr = "running"; break;
             case AudioContextState::Suspended: stateStr = "suspended"; break;
             case AudioContextState::Closed:    stateStr = "closed"; break;
@@ -85,30 +85,43 @@ namespace PrismaUI::Audio {
         return JSValueMakeNumber(ctx, 0.01);
     }
 
+    // [002] Helper: create an already-resolved Promise (all three context methods must return one)
+    static JSValueRef MakeResolvedPromise(JSContextRef ctx) {
+        JSObjectRef resolve = nullptr;
+        JSObjectRef promise = JSObjectMakeDeferredPromise(ctx, &resolve, nullptr, nullptr);
+        if (promise && resolve) {
+            JSObjectCallAsFunction(ctx, resolve, nullptr, 0, nullptr, nullptr);
+        }
+        return promise ? static_cast<JSValueRef>(promise) : JSValueMakeUndefined(ctx);
+    }
+
     // ---- AudioContext staticFunctions ----
 
     static JSValueRef Audio_resume(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj,
                                     size_t, const JSValueRef[], JSValueRef*) {
         auto* ac = GetAudioCtx(thisObj);
         if (ac) ResumeAudioContext(ac);
-        return JSValueMakeUndefined(ctx);
+        // [002] Must return a Promise per Web Audio API spec
+        return MakeResolvedPromise(ctx);
     }
 
     static JSValueRef Audio_suspend(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj,
                                      size_t, const JSValueRef[], JSValueRef*) {
         auto* ac = GetAudioCtx(thisObj);
         if (ac) SuspendAudioContext(ac);
-        return JSValueMakeUndefined(ctx);
+        // [002] Must return a Promise per Web Audio API spec
+        return MakeResolvedPromise(ctx);
     }
 
     static JSValueRef Audio_close(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj,
                                    size_t, const JSValueRef[], JSValueRef*) {
         auto* ac = GetAudioCtx(thisObj);
         if (ac) {
-            ac->state = AudioContextState::Closed;
-            SuspendAudioContext(ac);
+            SuspendAudioContext(ac);  // Stop voice if Running, no-op otherwise
+            ac->state.store(AudioContextState::Closed, std::memory_order_release);
         }
-        return JSValueMakeUndefined(ctx);
+        // [002] Must return a Promise per Web Audio API spec
+        return MakeResolvedPromise(ctx);
     }
 
     // Forward declarations for node creation (implemented in AudioBridgeNodes.cpp)
@@ -143,17 +156,22 @@ namespace PrismaUI::Audio {
         {nullptr, nullptr, nullptr, 0}
     };
 
-    static JSClassRef g_AudioContextClass = nullptr;
+    // [001] Null private on GC; AudioContext lifetime is managed by the View, not JS GC.
+    static void AudioContextFinalize(JSObjectRef obj) {
+        JSObjectSetPrivate(obj, nullptr);
+    }
 
     JSClassRef GetAudioContextClass() {
-        if (!g_AudioContextClass) {
+        // [003] Magic-static for thread-safe one-time init
+        static JSClassRef cls = []() {
             JSClassDefinition classDef{};
             classDef.className = "AudioContext";
             classDef.staticFunctions = kAudioContextFunctions;
             classDef.staticValues = kAudioContextValues;
-            g_AudioContextClass = JSClassCreate(&classDef);
-        }
-        return g_AudioContextClass;
+            classDef.finalize = AudioContextFinalize;
+            return JSClassCreate(&classDef);
+        }();
+        return cls;
     }
 
     // ---- JS_CreateAudioContext (native function injected as global) ----

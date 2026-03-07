@@ -60,7 +60,7 @@ namespace PrismaUI::Inspector {
             } else {
                 auto future =
                     ultralightThread.submit_with_priority(SingleThreadExecutor::Priority::MEDIUM, createInspector);
-                future.get();
+                WaitWithMessagePump(future);
             }
             logger::info("View [{}]: Inspector creation requested.", viewId);
         } catch (const std::exception& e) {
@@ -111,7 +111,7 @@ namespace PrismaUI::Inspector {
             } else {
                 auto future =
                     ultralightThread.submit_with_priority(SingleThreadExecutor::Priority::MEDIUM, focusInspector);
-                future.wait();
+                WaitWithMessagePump(future);
             }
         }
 
@@ -156,10 +156,10 @@ namespace PrismaUI::Inspector {
         const float maxX = std::max(0.0f, screenW - static_cast<float>(width));
         const float maxY = std::max(0.0f, screenH - static_cast<float>(height));
 
-        viewData->inspectorPosX = std::clamp(topLeftX, 0.0f, maxX);
-        viewData->inspectorPosY = std::clamp(topLeftY, 0.0f, maxY);
-        viewData->inspectorDisplayWidth = width;
-        viewData->inspectorDisplayHeight = height;
+        viewData->inspectorPosX.store(std::clamp(topLeftX, 0.0f, maxX), std::memory_order_relaxed);
+        viewData->inspectorPosY.store(std::clamp(topLeftY, 0.0f, maxY), std::memory_order_relaxed);
+        viewData->inspectorDisplayWidth.store(width, std::memory_order_relaxed);
+        viewData->inspectorDisplayHeight.store(height, std::memory_order_relaxed);
         viewData->inspectorPointerHover.store(false);
 
         try {
@@ -174,10 +174,10 @@ namespace PrismaUI::Inspector {
             } else {
                 auto future =
                     ultralightThread.submit_with_priority(SingleThreadExecutor::Priority::MEDIUM, resizeInspector);
-                future.wait();
+                WaitWithMessagePump(future);
             }
-            logger::info("View [{}]: Inspector bounds set to ({}, {}) with size {}x{}", viewId, topLeftX, topLeftY,
-                         width, height);
+            logger::info("View [{}]: Inspector bounds set to ({}, {}) with size {}x{}", viewId, viewData->inspectorPosX.load(),
+                         viewData->inspectorPosY.load(), width, height);
         } catch (const std::exception& e) {
             logger::error("View [{}]: Exception while setting inspector bounds: {}", viewId, e.what());
         }

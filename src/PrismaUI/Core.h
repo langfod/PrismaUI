@@ -88,7 +88,7 @@ namespace PrismaUI::Core {
         std::atomic<int> recoveryAttempts = 0;    // Track recovery attempts to prevent loops
 
         // WebGL support
-        WebGL::ANGLEContext* webglContext = nullptr;  // Non-null if view has an active WebGL canvas
+        std::atomic<WebGL::ANGLEContext*> webglContext{nullptr};  // Set once from ultralight thread, read from render thread
 
         // Web Audio support
         Audio::AudioContext* audioContext = nullptr;  // Non-null if view has an active AudioContext
@@ -110,10 +110,10 @@ namespace PrismaUI::Core {
         ID3D11ShaderResourceView* inspectorTextureView = nullptr;
         uint32_t inspectorTextureWidth = 0;
         uint32_t inspectorTextureHeight = 0;
-        float inspectorPosX = 0.0f;
-        float inspectorPosY = 0.0f;
-        uint32_t inspectorDisplayWidth = 0;
-        uint32_t inspectorDisplayHeight = 0;
+        std::atomic<float> inspectorPosX{0.0f};
+        std::atomic<float> inspectorPosY{0.0f};
+        std::atomic<uint32_t> inspectorDisplayWidth{0};
+        std::atomic<uint32_t> inspectorDisplayHeight{0};
         float inspectorOpacity = 1.0f;
 
         // Primary view rendering data
@@ -168,6 +168,34 @@ namespace PrismaUI::Core {
 
     extern std::map<std::pair<PrismaViewId, std::string>, JSCallbackData> jsCallbacks;
     extern std::mutex jsCallbacksMutex;
+
+    // Block-wait on a std::future while pumping Win32 messages.
+    // Prevents deadlocks when the ultralight thread (or any background thread)
+    // does a synchronous SendMessage to the game's HWND while the game thread
+    // is waiting for it to finish.
+    template <typename T>
+    T WaitWithMessagePump(std::future<T>& fut) {
+        while (fut.wait_for(std::chrono::milliseconds(1)) != std::future_status::ready) {
+            MSG msg;
+            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        return fut.get();
+    }
+
+    // void specialization
+    inline void WaitWithMessagePump(std::future<void>& fut) {
+        while (fut.wait_for(std::chrono::milliseconds(1)) != std::future_status::ready) {
+            MSG msg;
+            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        fut.get();
+    }
 
     extern inline REL::Relocation<Hooks::D3DPresentHook::D3DPresentFunc> RealD3dPresentFunc;
 

@@ -7,6 +7,7 @@
 #include "Inspector.h"
 #include "Utils/SIMDDispatch.h"
 #include <chrono>
+#include <unordered_set>
 
 namespace PrismaUI::ViewRenderer {
     using namespace Core;
@@ -328,13 +329,17 @@ namespace PrismaUI::ViewRenderer {
             // If no new draws happened, the texture content is stable and we can
             // draw without mutex synchronization.
             std::vector<WebGL::ANGLEContext*> acquiredMutexes;
+            std::unordered_set<WebGL::ANGLEContext*> failedContexts;
             for (const auto& viewData : viewsToDraw) {
-                if (!viewData || !viewData->webglContext) continue;
-                auto* wgl = viewData->webglContext;
+                if (!viewData) continue;
+                auto* wgl = viewData->webglContext.load(std::memory_order_acquire);
+                if (!wgl) continue;
                 if (wgl->useSharedTexturePath && wgl->mutexReleasedThisFrame && wgl->skyrimMutex) {
                     HRESULT hr = wgl->skyrimMutex->AcquireSync(1, 5);
                     if (SUCCEEDED(hr)) {
                         acquiredMutexes.push_back(wgl);
+                    } else {
+                        failedContexts.insert(wgl);
                     }
                 }
             }
@@ -342,6 +347,10 @@ namespace PrismaUI::ViewRenderer {
             spriteBatch->Begin(DirectX::SpriteSortMode_Deferred, commonStates->NonPremultiplied());
 
             for (const auto& viewData : viewsToDraw) {
+                if (viewData && viewData->webglContext.load(std::memory_order_relaxed) &&
+                    failedContexts.count(viewData->webglContext.load(std::memory_order_relaxed))) {
+                    continue;
+                }
                 DrawWebGLOverlay(viewData);
             }
 
@@ -399,7 +408,7 @@ namespace PrismaUI::ViewRenderer {
         // Draw inspector overlay if visible
         if (viewData->inspectorVisible.load() && viewData->inspectorTextureView &&
             viewData->inspectorTextureWidth > 0 && viewData->inspectorTextureHeight > 0) {
-            DirectX::SimpleMath::Vector2 inspectorPos(viewData->inspectorPosX, viewData->inspectorPosY);
+            DirectX::SimpleMath::Vector2 inspectorPos(viewData->inspectorPosX.load(), viewData->inspectorPosY.load());
             // Source rect should use actual texture dimensions
             RECT inspectorSourceRect = {0, 0, (long)viewData->inspectorTextureWidth,
                                         (long)viewData->inspectorTextureHeight};
@@ -412,7 +421,8 @@ namespace PrismaUI::ViewRenderer {
 
     void DrawWebGLOverlay(std::shared_ptr<Core::PrismaView> viewData) {
         if (!viewData) return;
-        if (!viewData->webglContext) {
+        auto* webgl = viewData->webglContext.load(std::memory_order_acquire);
+        if (!webgl) {
             static uint64_t lastNoCtxLog = 0;
             uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -422,20 +432,19 @@ namespace PrismaUI::ViewRenderer {
             }
             return;
         }
-        if (!viewData->webglContext->initialized || !viewData->webglContext->sharedSRV) {
+        if (!webgl->initialized || !webgl->sharedSRV) {
             static uint64_t lastUninitLog = 0;
             uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now().time_since_epoch()).count();
             if (now - lastUninitLog > 5000) {
                 logger::debug("[WebGL-DBG] DrawWebGLOverlay: context not ready (initialized={}, sharedSRV={})",
-                    viewData->webglContext->initialized,
-                    viewData->webglContext->sharedSRV != nullptr);
+                    webgl->initialized,
+                    webgl->sharedSRV != nullptr);
                 lastUninitLog = now;
             }
             return;
         }
 
-        auto* webgl = viewData->webglContext;
         if (!webgl->visible) {
             static uint64_t lastVisLog = 0;
             uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(

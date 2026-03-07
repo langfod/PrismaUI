@@ -373,10 +373,13 @@ namespace PrismaUI::WebGL {
             logger::info("[WebGL] Using CPU readback path (shared texture unavailable)");
         }
 
+        const char* renderer  = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+        const char* version   = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        const char* extensions = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
         logger::info("[WebGL] Created WebGL context: {}x{}, GL_RENDERER={}", width, height,
-                     reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
-        logger::info("[WebGL] GL_VERSION={}", reinterpret_cast<const char*>(glGetString(GL_VERSION)));
-        logger::info("[WebGL] GL_EXTENSIONS={}", reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS)));
+                     renderer ? renderer : "<unknown>");
+        logger::info("[WebGL] GL_VERSION={}", version ? version : "<unknown>");
+        logger::info("[WebGL] GL_EXTENSIONS={}", extensions ? extensions : "<unknown>");
 
         return ctx;
     }

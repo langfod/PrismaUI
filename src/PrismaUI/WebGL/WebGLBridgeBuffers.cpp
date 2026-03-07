@@ -82,6 +82,13 @@ namespace PrismaUI::WebGL {
                 size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, dataObj, nullptr);
                 void* ptr = GetTypedArrayDataPtr(ctx, dataObj);
                 glBufferSubData(target, offset, static_cast<GLsizeiptr>(byteLen), ptr);
+            } else {
+                // Plain ArrayBuffer
+                size_t byteLen = JSObjectGetArrayBufferByteLength(ctx, dataObj, nullptr);
+                if (byteLen > 0) {
+                    void* ptr = JSObjectGetArrayBufferBytesPtr(ctx, dataObj, nullptr);
+                    glBufferSubData(target, offset, static_cast<GLsizeiptr>(byteLen), ptr);
+                }
             }
         }
         return JSValueMakeUndefined(ctx);
@@ -116,6 +123,15 @@ namespace PrismaUI::WebGL {
         size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, dstData, nullptr);
         void* dstPtr = GetTypedArrayDataPtr(ctx, dstData);
         if (!dstPtr || byteLen == 0) return JSValueMakeUndefined(ctx);
+
+        // Validate range against the GPU buffer size before mapping
+        GLint bufferSize = 0;
+        glGetBufferParameteriv(target, GL_BUFFER_SIZE, &bufferSize);
+        if (bufferSize <= 0 ||
+            srcByteOffset < 0 ||
+            static_cast<GLintptr>(byteLen) > bufferSize - srcByteOffset) {
+            return JSValueMakeUndefined(ctx);
+        }
 
         // GLES3 doesn't have glGetBufferSubData. Emulate with glMapBufferRange.
         void* mapped = glMapBufferRange(target, srcByteOffset, static_cast<GLsizeiptr>(byteLen), GL_MAP_READ_BIT);

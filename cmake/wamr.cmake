@@ -43,9 +43,7 @@ set(WAMR_DISABLE_HW_BOUND_CHECK 1 CACHE BOOL "" FORCE)
 # We don't need the shared library (iwasm.dll), only the static lib (iwasm_static / vmlib.lib)
 set(WAMR_BUILD_SHARED 0 CACHE BOOL "" FORCE)
 
-
 FetchContent_MakeAvailable(wamr)
-
 
 # Helper function to add WAMR to a target
 # The WAMR static library target is "iwasm_static" (OUTPUT_NAME = vmlib)

@@ -29,8 +29,14 @@ namespace PrismaUI::Audio {
         float minValue = -3.4028235e+38f;
         float maxValue = 3.4028235e+38f;
 
-        // Scheduled events (guarded by AudioContext::graphMutex_)
+        // Scheduled events — guarded by eventsMutex.
+        // Evaluate() (audio thread) and Schedule*() (JS thread) must both hold the lock.
+        std::mutex eventsMutex;
         std::vector<AudioParamEvent> events;
+
+        // Atomic flag: true whenever events is non-empty. Audio thread checks this before
+        // lock-acquiring Evaluate() to avoid mutex overhead when there are no scheduled events.
+        std::atomic<bool> hasEvents{false};
 
         explicit AudioParam(float initial = 0.0f)
             : value(initial), defaultValue(initial) {}

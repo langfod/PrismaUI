@@ -3,7 +3,7 @@
   "EditorID": "AudioCategoryPrismaUI",
   "Name": {
     "TargetLanguage": "English",
-    "Value": "PrismUI"
+    "Value": "PrismaUI"
   },
   "Flags": [
     "ShouldAppearOnMenu"

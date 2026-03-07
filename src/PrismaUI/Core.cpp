@@ -494,9 +494,12 @@ namespace PrismaUI::Core {
             }
         });
 
-        // Wait for UI thread but handle any exceptions that might have escaped
+        // Wait for UI thread, pumping Win32 messages to avoid SendMessage deadlocks.
+        // Ultralight/WebCore may SendMessage to the game HWND during renderer->Update()
+        // (e.g. for COM, DWrite font queries).  If the game thread is blocked here without
+        // pumping, that SendMessage will never be delivered and both threads deadlock.
         try {
-            ultralightFuture.get();
+            WaitWithMessagePump(ultralightFuture);
         } catch (const std::exception& e) {
             logger::error("D3DPresent: Exception from UI thread: {}", e.what());
         } catch (...) {

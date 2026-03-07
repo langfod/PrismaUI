@@ -84,17 +84,22 @@ namespace PrismaUI::Audio {
         {nullptr, nullptr, nullptr, 0}
     };
 
-    static JSClassRef g_GainNodeClass = nullptr;
+    // [001] Null private pointer on GC; nodes are owned by AudioContext::nodes.
+    static void AudioNodeFinalize(JSObjectRef obj) {
+        JSObjectSetPrivate(obj, nullptr);
+    }
 
     JSClassRef GetGainNodeClass() {
-        if (!g_GainNodeClass) {
+        // [007] Use magic-static for thread-safe one-time init
+        static JSClassRef cls = []() {
             JSClassDefinition classDef{};
             classDef.className = "GainNode";
             classDef.staticFunctions = kGainNodeFunctions;
             classDef.staticValues = kGainNodeValues;
-            g_GainNodeClass = JSClassCreate(&classDef);
-        }
-        return g_GainNodeClass;
+            classDef.finalize = AudioNodeFinalize;
+            return JSClassCreate(&classDef);
+        }();
+        return cls;
     }
 
     // ---- AudioDestinationNode ----
@@ -105,16 +110,16 @@ namespace PrismaUI::Audio {
         {nullptr, nullptr, 0}
     };
 
-    static JSClassRef g_DestinationNodeClass = nullptr;
-
     JSClassRef GetAudioDestinationNodeClass() {
-        if (!g_DestinationNodeClass) {
+        // [007] Magic-static; destination node is owned by AudioContext, not JS GC
+        static JSClassRef cls = []() {
             JSClassDefinition classDef{};
             classDef.className = "AudioDestinationNode";
             classDef.staticFunctions = kDestinationNodeFunctions;
-            g_DestinationNodeClass = JSClassCreate(&classDef);
-        }
-        return g_DestinationNodeClass;
+            classDef.finalize = AudioNodeFinalize;
+            return JSClassCreate(&classDef);
+        }();
+        return cls;
     }
 
     // ---- AudioBufferSourceNode ----
@@ -150,8 +155,10 @@ namespace PrismaUI::Audio {
     static JSValueRef Audio_getBuffer(JSContextRef ctx, JSObjectRef obj,
                                        JSStringRef, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
-        if (!node || !node->buffer) return JSValueMakeNull(ctx);
-        return JSObjectMake(ctx, GetAudioBufferClass(), node->buffer);
+        if (!node) return JSValueMakeNull(ctx);
+        AudioBuffer* buf = node->buffer.load(std::memory_order_relaxed);
+        if (!buf) return JSValueMakeNull(ctx);
+        return JSObjectMake(ctx, GetAudioBufferClass(), buf);
     }
 
     static bool Audio_setBuffer(JSContextRef ctx, JSObjectRef obj,
@@ -160,7 +167,7 @@ namespace PrismaUI::Audio {
         if (!node) return false;
 
         if (JSValueIsNull(ctx, val) || JSValueIsUndefined(ctx, val)) {
-            node->buffer = nullptr;
+            node->buffer.store(nullptr, std::memory_order_relaxed);
             return true;
         }
 
@@ -168,7 +175,7 @@ namespace PrismaUI::Audio {
         if (!bufObj) return false;
 
         auto* buf = static_cast<AudioBuffer*>(JSObjectGetPrivate(bufObj));
-        node->buffer = buf;
+        node->buffer.store(buf, std::memory_order_relaxed);
         return true;
     }
 
@@ -176,14 +183,14 @@ namespace PrismaUI::Audio {
                                      JSStringRef, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return JSValueMakeBoolean(ctx, false);
-        return JSValueMakeBoolean(ctx, node->loop);
+        return JSValueMakeBoolean(ctx, node->loop.load(std::memory_order_relaxed));
     }
 
     static bool Audio_setLoop(JSContextRef ctx, JSObjectRef obj,
                                JSStringRef, JSValueRef val, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return false;
-        node->loop = JSValueToBoolean(ctx, val);
+        node->loop.store(JSValueToBoolean(ctx, val), std::memory_order_relaxed);
         return true;
     }
 
@@ -191,14 +198,14 @@ namespace PrismaUI::Audio {
                                           JSStringRef, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return JSValueMakeNumber(ctx, 0);
-        return JSValueMakeNumber(ctx, node->loopStart);
+        return JSValueMakeNumber(ctx, node->loopStart.load(std::memory_order_relaxed));
     }
 
     static bool Audio_setLoopStart(JSContextRef ctx, JSObjectRef obj,
                                     JSStringRef, JSValueRef val, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return false;
-        node->loopStart = JSValueToNumber(ctx, val, nullptr);
+        node->loopStart.store(JSValueToNumber(ctx, val, nullptr), std::memory_order_relaxed);
         return true;
     }
 
@@ -206,14 +213,14 @@ namespace PrismaUI::Audio {
                                         JSStringRef, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return JSValueMakeNumber(ctx, 0);
-        return JSValueMakeNumber(ctx, node->loopEnd);
+        return JSValueMakeNumber(ctx, node->loopEnd.load(std::memory_order_relaxed));
     }
 
     static bool Audio_setLoopEnd(JSContextRef ctx, JSObjectRef obj,
                                   JSStringRef, JSValueRef val, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return false;
-        node->loopEnd = JSValueToNumber(ctx, val, nullptr);
+        node->loopEnd.store(JSValueToNumber(ctx, val, nullptr), std::memory_order_relaxed);
         return true;
     }
 
@@ -249,17 +256,17 @@ namespace PrismaUI::Audio {
         {nullptr, nullptr, nullptr, 0}
     };
 
-    static JSClassRef g_BufferSourceClass = nullptr;
-
     JSClassRef GetBufferSourceNodeClass() {
-        if (!g_BufferSourceClass) {
+        // [007] Magic-static
+        static JSClassRef cls = []() {
             JSClassDefinition classDef{};
             classDef.className = "AudioBufferSourceNode";
             classDef.staticFunctions = kBufferSourceFunctions;
             classDef.staticValues = kBufferSourceValues;
-            g_BufferSourceClass = JSClassCreate(&classDef);
-        }
-        return g_BufferSourceClass;
+            classDef.finalize = AudioNodeFinalize;
+            return JSClassCreate(&classDef);
+        }();
+        return cls;
     }
 
     // ---- AudioBuffer ----
@@ -272,13 +279,24 @@ namespace PrismaUI::Audio {
         uint32_t ch = static_cast<uint32_t>(JSValueToNumber(ctx, argv[0], nullptr));
         if (ch >= buf->numberOfChannels) return JSValueMakeNull(ctx);
 
-        // Create a Float32Array wrapping the channel data
-        size_t byteLen = buf->channelData[ch].size() * sizeof(float);
-        JSObjectRef arrayBuffer = JSObjectMakeArrayBufferWithBytesNoCopy(
-            ctx, buf->channelData[ch].data(), byteLen,
-            nullptr, nullptr, nullptr);
+        // [005] Copy channel data into a heap-allocated buffer so the JS Float32Array has
+        // independent lifetime from the AudioBuffer. The deallocator frees it when JS GC
+        // collects the ArrayBuffer, preventing use-after-free if the AudioBuffer is freed first.
+        size_t numFloats = buf->channelData[ch].size();
+        size_t byteLen = numFloats * sizeof(float);
 
-        if (!arrayBuffer) return JSValueMakeNull(ctx);
+        float* copy = new float[numFloats];
+        std::memcpy(copy, buf->channelData[ch].data(), byteLen);
+
+        JSObjectRef arrayBuffer = JSObjectMakeArrayBufferWithBytesNoCopy(
+            ctx, copy, byteLen,
+            [](void* bytes, void*) { delete[] static_cast<float*>(bytes); },
+            nullptr, nullptr);
+
+        if (!arrayBuffer) {
+            delete[] copy;
+            return JSValueMakeNull(ctx);
+        }
 
         JSObjectRef float32Array = JSObjectMakeTypedArrayWithArrayBufferAndOffset(
             ctx, kJSTypedArrayTypeFloat32Array, arrayBuffer, 0, buf->length, nullptr);
@@ -387,18 +405,17 @@ namespace PrismaUI::Audio {
         {nullptr, nullptr, nullptr, 0}
     };
 
-    static JSClassRef g_AudioBufferClass = nullptr;
-
     JSClassRef GetAudioBufferClass() {
-        if (!g_AudioBufferClass) {
+        // [007] Magic-static
+        static JSClassRef cls = []() {
             JSClassDefinition classDef{};
             classDef.className = "AudioBuffer";
             classDef.staticFunctions = kAudioBufferFunctions;
             classDef.staticValues = kAudioBufferValues;
             classDef.finalize = AudioBufferFinalize;
-            g_AudioBufferClass = JSClassCreate(&classDef);
-        }
-        return g_AudioBufferClass;
+            return JSClassCreate(&classDef);
+        }();
+        return cls;
     }
 
     // ---- Factory functions (called from AudioBridge.cpp as AudioContext methods) ----

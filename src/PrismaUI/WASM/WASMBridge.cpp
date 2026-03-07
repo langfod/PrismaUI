@@ -219,9 +219,9 @@ namespace PrismaUI::WASM {
     // JSC Class definitions
     // =========================================================================
 
-    static JSClassRef g_WASMModuleClass = nullptr;
-    static JSClassRef g_WASMInstanceClass = nullptr;
-    static JSClassRef g_ExportFuncClass = nullptr;
+    // =========================================================================
+    // WASM JSC class singletons (magic-static, safe for concurrent first-use)
+    // =========================================================================
 
     // --- Module class ---
 
@@ -237,13 +237,13 @@ namespace PrismaUI::WASM {
     }
 
     static JSClassRef GetWASMModuleClass() {
-        if (!g_WASMModuleClass) {
+        static JSClassRef cls = []() {
             JSClassDefinition def{};
             def.className = "WebAssembly.Module";
             def.finalize = WASMModuleFinalize;
-            g_WASMModuleClass = JSClassCreate(&def);
-        }
-        return g_WASMModuleClass;
+            return JSClassCreate(&def);
+        }();
+        return cls;
     }
 
     // --- Export function class ---
@@ -259,7 +259,7 @@ namespace PrismaUI::WASM {
     }
 
     static JSClassRef GetExportFuncClass() {
-        if (!g_ExportFuncClass) {
+        static JSClassRef cls = []() {
             JSClassDefinition def{};
             def.className = "WebAssembly.ExportedFunction";
             def.finalize = ExportFuncFinalize;
@@ -380,9 +380,9 @@ namespace PrismaUI::WASM {
                         static_cast<int32_t>(wasmArgv[0])));
                 }
             };
-            g_ExportFuncClass = JSClassCreate(&def);
-        }
-        return g_ExportFuncClass;
+            return JSClassCreate(&def);
+        }();
+        return cls;
     }
 
     // --- Instance class ---
@@ -392,6 +392,9 @@ namespace PrismaUI::WASM {
         if (data) {
             // Remove from view's tracking list
             {
+                // wasmInstances is only mutated from the ultralight thread (GC finalize
+                // here, and Destroy runs inline via IsWorkerThread guard), so shared_lock
+                // on viewsMutex is sufficient — we only need read access to the map.
                 std::shared_lock lock(Core::viewsMutex);
                 auto it = Core::views.find(data->viewId);
                 if (it != Core::views.end() && it->second->wasmInstances) {
@@ -433,13 +436,13 @@ namespace PrismaUI::WASM {
     }
 
     static JSClassRef GetWASMInstanceClass() {
-        if (!g_WASMInstanceClass) {
+        static JSClassRef cls = []() {
             JSClassDefinition def{};
             def.className = "WebAssembly.Instance";
             def.finalize = WASMInstanceFinalize;
-            g_WASMInstanceClass = JSClassCreate(&def);
-        }
-        return g_WASMInstanceClass;
+            return JSClassCreate(&def);
+        }();
+        return cls;
     }
 
     // =========================================================================
@@ -695,6 +698,8 @@ namespace PrismaUI::WASM {
         int32_t exportCount = wasm_runtime_get_export_count(modData->wasmModule);
         JSObjectRef resultArray = JSObjectMakeArray(ctx, 0, nullptr, nullptr);
 
+        // [055] Use a separate write index so null-name exports don't create sparse gaps
+        unsigned writeIdx = 0;
         for (int32_t i = 0; i < exportCount; i++) {
             wasm_export_t exportInfo;
             wasm_runtime_get_export_type(modData->wasmModule, i, &exportInfo);
@@ -722,7 +727,7 @@ namespace PrismaUI::WASM {
             JSStringRelease(kindVal);
             JSStringRelease(kindProp);
 
-            JSObjectSetPropertyAtIndex(ctx, resultArray, static_cast<unsigned>(i), entry, nullptr);
+            JSObjectSetPropertyAtIndex(ctx, resultArray, writeIdx++, entry, nullptr);
         }
 
         return resultArray;
@@ -1015,6 +1020,7 @@ namespace PrismaUI::WASM {
 
         // Track instance on the PrismaView for cleanup on view destroy
         {
+            // wasmInstances is only mutated from the ultralight thread — shared_lock suffices.
             std::shared_lock lock(Core::viewsMutex);
             auto it = Core::views.find(viewId);
             if (it != Core::views.end()) {

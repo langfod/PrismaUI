@@ -71,9 +71,10 @@ namespace PrismaUI::GPU {
     // ============================================================
 
     void GPUDriverD3D11::UpdateCommandList(const ultralight::CommandList& list) {
-        if (list.size) {
+        if (list.size && list.commands != nullptr) {
             m_CommandList.resize(list.size);
             memcpy(m_CommandList.data(), list.commands, sizeof(ultralight::Command) * list.size);
+            m_hasPendingCommands.store(true, std::memory_order_release);
         }
     }
 
@@ -91,6 +92,7 @@ namespace PrismaUI::GPU {
         }
 
         m_CommandList.clear();
+        m_hasPendingCommands.store(false, std::memory_order_release);
     }
 
     // ============================================================
@@ -227,8 +229,12 @@ namespace PrismaUI::GPU {
         auto& render_target_entry = m_RenderTargetMap[renderBufferId];
         render_target_entry.RenderTargetTextureId = buffer.texture_id;
 
+        // Get the actual texture format to avoid creating a mismatched RTV
+        D3D11_TEXTURE2D_DESC texDesc = {};
+        textureIter->second.Texture->GetDesc(&texDesc);
+
         D3D11_RENDER_TARGET_VIEW_DESC rtvDesc = {};
-        rtvDesc.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+        rtvDesc.Format = texDesc.Format;
         rtvDesc.ViewDimension = D3D11_RTV_DIMENSION_TEXTURE2D;
 
         HRESULT hr = m_Device->CreateRenderTargetView(textureIter->second.Texture.Get(), &rtvDesc,
@@ -516,8 +522,9 @@ namespace PrismaUI::GPU {
             DirectX::XMStoreFloat4(&cbdata.Vector[i], vec);
         }
 
-        cbdata.ClipData = {static_cast<int32_t>(state.clip_size), 0, 0, 0};
-        for (size_t i = 0; i < state.clip_size; ++i) cbdata.Clip[i] = DirectX::XMMATRIX(state.clip[i].data);
+        const uint32_t clipCount = std::min<uint32_t>(state.clip_size, 8u);
+        cbdata.ClipData = {static_cast<int32_t>(clipCount), 0, 0, 0};
+        for (size_t i = 0; i < clipCount; ++i) cbdata.Clip[i] = DirectX::XMMATRIX(state.clip[i].data);
 
         m_ConstantBuffer.ApplyChanges(m_Context.Get());
     }

@@ -33,7 +33,7 @@ namespace PrismaUI::GPU {
         // Phase 2: Initialize D3D resources when device/context become available
         void InitializeD3D(ID3D11Device* device, ID3D11DeviceContext* context);
         bool IsD3DInitialized() const { return m_D3DInitialized; }
-        bool HasPendingCommands() const { return !m_CommandList.empty(); }
+        bool HasPendingCommands() const { return m_hasPendingCommands.load(std::memory_order_acquire); }
 
         // ul::GPUDriver overrides
         void BeginSynchronize() override;
@@ -97,6 +97,7 @@ namespace PrismaUI::GPU {
 
         // Command list
         std::vector<ultralight::Command> m_CommandList;
+        std::atomic<bool> m_hasPendingCommands{false};
 
         // Shaders
         VertexShader m_VertexShader_Fill;

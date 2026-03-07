@@ -7,8 +7,10 @@
 #include <dxgi.h>
 #include <wrl/client.h>
 
+#include <atomic>
 #include <cstdint>
 #include <span>
+#include <unordered_map>
 #include <vector>
 
 namespace PrismaUI::WebGL {
@@ -62,6 +64,11 @@ namespace PrismaUI::WebGL {
         std::vector<GLubyte> readbackFlipped;
 
         bool initialized = false;
+
+        // WebGL2 sync objects: maps uint32_t id → GLsync pointer.
+        // GLsync is a 64-bit pointer; we never cast it through GLuint.
+        std::unordered_map<uint32_t, GLsync> syncObjects;
+        std::atomic<uint32_t> nextSyncId{1};
     };
 
     // Initialize the global ANGLE EGL display with its own D3D11 device.

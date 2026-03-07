@@ -10,6 +10,8 @@
 #include <d3d11.h>
 
 #include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <shared_mutex>
 #include <string>
 
@@ -275,16 +277,14 @@ namespace PrismaUI::WebGL {
         {nullptr, nullptr, 0}
     };
 
-    static JSClassRef g_WebGLContextClass = nullptr;
-
     JSClassRef GetWebGLContextClass() {
-        if (!g_WebGLContextClass) {
+        static JSClassRef cls = []() {
             JSClassDefinition classDef{};  // Zero-init (avoids kJSClassDefinitionEmpty data import that breaks /DELAYLOAD)
             classDef.className = "WebGLRenderingContext";
             classDef.staticFunctions = kWebGLFunctions;
-            g_WebGLContextClass = JSClassCreate(&classDef);
-        }
-        return g_WebGLContextClass;
+            return JSClassCreate(&classDef);
+        }();
+        return cls;
     }
 
     // =========================================================================
@@ -299,8 +299,12 @@ namespace PrismaUI::WebGL {
             return JSValueMakeNull(ctx);
         }
 
-        uint32_t width = static_cast<uint32_t>(JSValueToNumber(ctx, argv[0], exc));
-        uint32_t height = static_cast<uint32_t>(JSValueToNumber(ctx, argv[1], exc));
+        double dw = JSValueToNumber(ctx, argv[0], exc);
+        double dh = JSValueToNumber(ctx, argv[1], exc);
+        if (std::isnan(dw) || dw < 0 || dw > static_cast<double>(UINT32_MAX)) dw = 0;
+        if (std::isnan(dh) || dh < 0 || dh > static_cast<double>(UINT32_MAX)) dh = 0;
+        uint32_t width = static_cast<uint32_t>(dw);
+        uint32_t height = static_cast<uint32_t>(dh);
 
         if (width == 0 || height == 0) {
             width = width ? width : 300;
@@ -354,7 +358,7 @@ namespace PrismaUI::WebGL {
             std::shared_lock lock(Core::viewsMutex);
             auto it = Core::views.find(viewId);
             if (it != Core::views.end()) {
-                it->second->webglContext = angleCtx;
+                it->second->webglContext.store(angleCtx, std::memory_order_release);
                 logger::info("[WebGL] ANGLE context linked to PrismaView {}", viewId);
             }
         }

@@ -21,7 +21,16 @@ namespace PrismaUI::Audio {
         std::memset(outL, 0, numFrames * sizeof(float));
         std::memset(outR, 0, numFrames * sizeof(float));
 
-        if (inputs.empty()) return;
+        if (inputs.empty()) {
+            // [026] Update scratch so a subsequent cached-path read sees silence, not stale data
+            if (scratchL.size() < numFrames) {
+                scratchL.resize(numFrames);
+                scratchR.resize(numFrames);
+            }
+            std::memset(scratchL.data(), 0, numFrames * sizeof(float));
+            std::memset(scratchR.data(), 0, numFrames * sizeof(float));
+            return;
+        }
 
         // Ensure scratch buffers are large enough
         if (scratchL.size() < numFrames) {
@@ -78,8 +87,8 @@ namespace PrismaUI::Audio {
         }
 
         // Apply gain
-        if (gain.events.empty()) {
-            // Fast path: constant gain
+        if (!gain.hasEvents.load(std::memory_order_relaxed)) {
+            // Fast path: constant gain — no mutex needed
             float g = gain.value.load(std::memory_order_relaxed);
             for (uint32_t i = 0; i < numFrames; ++i) {
                 outL[i] *= g;
@@ -103,16 +112,17 @@ namespace PrismaUI::Audio {
     // ---- AudioBufferSourceNode ----
     void AudioBufferSourceNode::Start(double when, double offset, double /*duration*/) {
         if (started.load(std::memory_order_relaxed)) return;  // Can only be started once (per spec)
-        startTime = when;
+        startTime.store(when, std::memory_order_relaxed);
         startOffset = offset;
-        if (buffer && offset > 0.0) {
-            playbackPosition = static_cast<uint64_t>(offset * buffer->sampleRate);
+        AudioBuffer* buf = buffer.load(std::memory_order_relaxed);
+        if (buf && offset > 0.0) {
+            playbackPosition = static_cast<uint64_t>(offset * buf->sampleRate);
         }
         started.store(true, std::memory_order_release);  // Publish all preceding writes
     }
 
     void AudioBufferSourceNode::Stop(double when) {
-        stopTime = when;
+        stopTime.store(when, std::memory_order_relaxed);
     }
 
     void AudioBufferSourceNode::Process(float* outL, float* outR, uint32_t numFrames,
@@ -129,8 +139,10 @@ namespace PrismaUI::Audio {
             scratchR.resize(numFrames);
         }
 
+        AudioBuffer* buf = buffer.load(std::memory_order_acquire);
+
         // Not started, ended, or no buffer => silence
-        if (!started.load(std::memory_order_acquire) || ended.load(std::memory_order_relaxed) || !buffer || buffer->length == 0) {
+        if (!started.load(std::memory_order_acquire) || ended.load(std::memory_order_relaxed) || !buf || buf->length == 0) {
             std::memset(outL, 0, numFrames * sizeof(float));
             std::memset(outR, 0, numFrames * sizeof(float));
             std::memcpy(scratchL.data(), outL, numFrames * sizeof(float));
@@ -138,21 +150,28 @@ namespace PrismaUI::Audio {
             return;
         }
 
-        uint32_t bufferLength = buffer->length;
-        uint32_t numChannels = buffer->numberOfChannels;
-        const float* ch0 = (numChannels > 0) ? buffer->channelData[0].data() : nullptr;
-        const float* ch1 = (numChannels > 1) ? buffer->channelData[1].data() : ch0;
+        uint32_t bufferLength = buf->length;
+        uint32_t numChannels = buf->numberOfChannels;
+        const float* ch0 = (numChannels > 0) ? buf->channelData[0].data() : nullptr;
+        const float* ch1 = (numChannels > 1) ? buf->channelData[1].data() : ch0;
+
+        // Load atomic params once per render block to avoid repeated atomic reads in the hot loop
+        const double nodeStartTime = startTime.load(std::memory_order_relaxed);
+        const double nodeStopTime  = stopTime.load(std::memory_order_relaxed);
+        const bool   nodeLoop      = loop.load(std::memory_order_relaxed);
+        const double nodeLoopStart = loopStart.load(std::memory_order_relaxed);
+        const double nodeLoopEnd   = loopEnd.load(std::memory_order_relaxed);
 
         // Determine loop boundaries
         uint64_t loopStartSample = 0;
         uint64_t loopEndSample = bufferLength;
-        if (loop) {
-            if (loopStart > 0.0) {
-                loopStartSample = static_cast<uint64_t>(loopStart * buffer->sampleRate);
+        if (nodeLoop) {
+            if (nodeLoopStart > 0.0) {
+                loopStartSample = static_cast<uint64_t>(nodeLoopStart * buf->sampleRate);
                 loopStartSample = std::min(loopStartSample, static_cast<uint64_t>(bufferLength));
             }
-            if (loopEnd > 0.0) {
-                loopEndSample = static_cast<uint64_t>(loopEnd * buffer->sampleRate);
+            if (nodeLoopEnd > 0.0) {
+                loopEndSample = static_cast<uint64_t>(nodeLoopEnd * buf->sampleRate);
                 loopEndSample = std::min(loopEndSample, static_cast<uint64_t>(bufferLength));
             }
             if (loopEndSample <= loopStartSample) {
@@ -164,14 +183,14 @@ namespace PrismaUI::Audio {
             double frameTime = contextTime + static_cast<double>(i) / sampleRate;
 
             // Not yet at start time => silence
-            if (frameTime < startTime) {
+            if (frameTime < nodeStartTime) {
                 outL[i] = 0.0f;
                 outR[i] = 0.0f;
                 continue;
             }
 
             // Check stop time
-            if (stopTime >= 0.0 && frameTime >= stopTime) {
+            if (nodeStopTime >= 0.0 && frameTime >= nodeStopTime) {
                 ended = true;
                 endedEventPending = true;
                 // Fill remaining with silence
@@ -182,7 +201,7 @@ namespace PrismaUI::Audio {
 
             // Check bounds
             if (playbackPosition >= bufferLength) {
-                if (loop) {
+                if (nodeLoop) {
                     playbackPosition = loopStartSample;
                 } else {
                     ended = true;
@@ -203,7 +222,7 @@ namespace PrismaUI::Audio {
             playbackPosition++;
 
             // Loop wrap
-            if (loop && playbackPosition >= loopEndSample) {
+            if (nodeLoop && playbackPosition >= loopEndSample) {
                 playbackPosition = loopStartSample;
             }
         }

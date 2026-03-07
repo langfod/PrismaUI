@@ -744,10 +744,10 @@ namespace PrismaUI::InputHandler {
                                 // Check if mouse is over inspector bounds when inspector is visible
                                 bool mouseOverInspector = false;
                                 if (inspectorView && targetViewData->inspectorVisible.load()) {
-                                    const float inspX = targetViewData->inspectorPosX;
-                                    const float inspY = targetViewData->inspectorPosY;
-                                    const float inspW = static_cast<float>(targetViewData->inspectorDisplayWidth);
-                                    const float inspH = static_cast<float>(targetViewData->inspectorDisplayHeight);
+                                    const float inspX = targetViewData->inspectorPosX.load();
+                                    const float inspY = targetViewData->inspectorPosY.load();
+                                    const float inspW = static_cast<float>(targetViewData->inspectorDisplayWidth.load());
+                                    const float inspH = static_cast<float>(targetViewData->inspectorDisplayHeight.load());
 
                                     const float mouseX = static_cast<float>(arg.x);
                                     const float mouseY = static_cast<float>(arg.y);
@@ -764,8 +764,8 @@ namespace PrismaUI::InputHandler {
                                 if (mouseOverInspector) {
                                     // Translate mouse coordinates to inspector view
                                     ultralight::MouseEvent inspectorEvent = arg;
-                                    inspectorEvent.x = arg.x - static_cast<int>(targetViewData->inspectorPosX);
-                                    inspectorEvent.y = arg.y - static_cast<int>(targetViewData->inspectorPosY);
+                                    inspectorEvent.x = arg.x - static_cast<int>(targetViewData->inspectorPosX.load());
+                                    inspectorEvent.y = arg.y - static_cast<int>(targetViewData->inspectorPosY.load());
                                     inspectorView->FireMouseEvent(inspectorEvent);
                                 } else {
                                     ulView->FireMouseEvent(arg);
@@ -775,10 +775,10 @@ namespace PrismaUI::InputHandler {
                                 // Use captured mouse position for accurate bounds checking
                                 bool scrollOverInspector = false;
                                 if (inspectorView && targetViewData->inspectorVisible.load()) {
-                                    const float inspX = targetViewData->inspectorPosX;
-                                    const float inspY = targetViewData->inspectorPosY;
-                                    const float inspW = static_cast<float>(targetViewData->inspectorDisplayWidth);
-                                    const float inspH = static_cast<float>(targetViewData->inspectorDisplayHeight);
+                                    const float inspX = targetViewData->inspectorPosX.load();
+                                    const float inspY = targetViewData->inspectorPosY.load();
+                                    const float inspW = static_cast<float>(targetViewData->inspectorDisplayWidth.load());
+                                    const float inspH = static_cast<float>(targetViewData->inspectorDisplayHeight.load());
 
                                     const float mouseX = static_cast<float>(arg.mouseX);
                                     const float mouseY = static_cast<float>(arg.mouseY);

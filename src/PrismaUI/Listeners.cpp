@@ -161,7 +161,10 @@ namespace PrismaUI::Listeners {
                             var ny = offY + (fr.top || 0);
                             var loc = '';
                             try { loc = cw.location.href; } catch(e) { continue; }
-                            if (loc === targetUrl) {
+                            var locNorm = loc, tgtNorm = targetUrl;
+                            try { locNorm = new URL(loc).href; } catch(e) {}
+                            try { tgtNorm = new URL(targetUrl).href; } catch(e) {}
+                            if (locNorm === tgtNorm) {
                                 if (typeof cw.__prismaWebGLShimLoaded !== 'undefined')
                                     return 'already';
                                 cw.__prismaCreateWebGLContext = __prismaCreateWebGLContext;
@@ -271,7 +274,7 @@ namespace PrismaUI::Listeners {
     MyViewListener::~MyViewListener() = default;
 
     void MyViewListener::OnAddConsoleMessage([[maybe_unused]] View* caller, [[maybe_unused]] const ConsoleMessage& message) {
-        auto callerUrl = caller ? caller->url().utf8().data() : "unknown";
+        //auto callerUrl = caller ? caller->url().utf8().data() : "unknown";
         //logger::info("View [{}] on {}: JSConsole: {}", viewId_, callerUrl, message.message().utf8().data());
 
         std::shared_lock lock(viewsMutex);
@@ -307,8 +310,8 @@ namespace PrismaUI::Listeners {
             auto viewData = it->second;
 
             if (!viewData->inspectorView && viewData->ultralightView && renderer) {
-                uint32_t width = viewData->inspectorDisplayWidth > 0 ? viewData->inspectorDisplayWidth : 800;
-                uint32_t height = viewData->inspectorDisplayHeight > 0 ? viewData->inspectorDisplayHeight : 600;
+                uint32_t width = viewData->inspectorDisplayWidth.load() > 0 ? viewData->inspectorDisplayWidth.load() : 800;
+                uint32_t height = viewData->inspectorDisplayHeight.load() > 0 ? viewData->inspectorDisplayHeight.load() : 600;
 
                 ViewConfig config;
                 config.is_accelerated = false;

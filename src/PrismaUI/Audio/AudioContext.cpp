@@ -95,14 +95,22 @@ namespace PrismaUI::Audio {
         xaBuf.AudioBytes = XAudio2Output::kBufferBytes;
         xaBuf.pAudioData = reinterpret_cast<const BYTE*>(buf);
         xaBuf.pContext = ctx;
-        xa.sourceVoice->SubmitSourceBuffer(&xaBuf);
+        // [014] Check HRESULT from SubmitSourceBuffer
+        HRESULT hr = xa.sourceVoice->SubmitSourceBuffer(&xaBuf);
+        if (FAILED(hr)) {
+            logger::error("[Audio] SubmitSourceBuffer failed: {:08X}", static_cast<uint32_t>(hr));
+        }
 
         xa.currentBuffer ^= 1;  // Toggle 0/1
     }
 
     void XAudio2Output::OnBufferEnd(void* pBufferContext) {
         auto* context = static_cast<AudioContext*>(pBufferContext);
-        if (!context || context->state != AudioContextState::Running) return;
+        // [016] Check destroying flag before touching any context members.
+        // Set before Stop/Flush in DestroyAudioContext; DestroyVoice() then blocks
+        // until any in-flight callback has returned.
+        if (!context || context->destroying.load(std::memory_order_acquire)) return;
+        if (context->state.load(std::memory_order_acquire) != AudioContextState::Running) return;
         RenderAndSubmit(context);
     }
 
@@ -173,7 +181,7 @@ namespace PrismaUI::Audio {
         ctx->destinationNode = dest.get();
         ctx->nodes.push_back(std::move(dest));
 
-        ctx->state = AudioContextState::Suspended;
+        ctx->state.store(AudioContextState::Suspended, std::memory_order_relaxed);
 
         logger::info("[Audio] AudioContext created (standalone XAudio2, sampleRate={})",
                      ctx->sampleRate);
@@ -182,15 +190,20 @@ namespace PrismaUI::Audio {
 
     void ResumeAudioContext(AudioContext* ctx) {
         if (!ctx || ctx->destroyed) return;
-        if (ctx->state == AudioContextState::Suspended) {
-            ctx->state = AudioContextState::Running;
+        if (ctx->state.load(std::memory_order_acquire) == AudioContextState::Suspended) {
+            ctx->state.store(AudioContextState::Running, std::memory_order_release);
 
             // Prime both buffers so XAudio2 has data immediately
             RenderAndSubmit(ctx);
             RenderAndSubmit(ctx);
 
             // Start the voice (begins consuming submitted buffers)
-            ctx->xaOutput.sourceVoice->Start();
+            // [013] Check HRESULT from Start()
+            HRESULT hr = ctx->xaOutput.sourceVoice->Start();
+            if (FAILED(hr)) {
+                logger::error("[Audio] IXAudio2SourceVoice::Start() failed: {:08X}",
+                              static_cast<uint32_t>(hr));
+            }
 
             logger::debug("[Audio] AudioContext resumed (XAudio2)");
         }
@@ -198,10 +211,10 @@ namespace PrismaUI::Audio {
 
     void SuspendAudioContext(AudioContext* ctx) {
         if (!ctx || ctx->destroyed) return;
-        if (ctx->state == AudioContextState::Running) {
+        if (ctx->state.load(std::memory_order_acquire) == AudioContextState::Running) {
             ctx->xaOutput.sourceVoice->Stop();
             ctx->xaOutput.sourceVoice->FlushSourceBuffers();
-            ctx->state = AudioContextState::Suspended;
+            ctx->state.store(AudioContextState::Suspended, std::memory_order_release);
             logger::debug("[Audio] AudioContext suspended (XAudio2)");
         }
     }
@@ -209,11 +222,17 @@ namespace PrismaUI::Audio {
     void DestroyAudioContext(AudioContext* ctx) {
         if (!ctx || ctx->destroyed) return;
         ctx->destroyed = true;
-        ctx->state = AudioContextState::Closed;
+
+        // [016] Signal the audio callback to stop re-entering before touching the voice.
+        // OnBufferEnd checks this flag first; DestroyVoice() then blocks until any
+        // in-flight callback has returned, so delete ctx is safe after that.
+        ctx->destroying.store(true, std::memory_order_release);
+        ctx->state.store(AudioContextState::Closed, std::memory_order_release);
 
         if (ctx->xaOutput.sourceVoice) {
             ctx->xaOutput.sourceVoice->Stop();
             ctx->xaOutput.sourceVoice->FlushSourceBuffers();
+            // DestroyVoice() blocks until all in-flight callbacks have returned
             ctx->xaOutput.sourceVoice->DestroyVoice();
             ctx->xaOutput.sourceVoice = nullptr;
         }
@@ -243,6 +262,7 @@ namespace PrismaUI::Audio {
         // Safe because ctx->nodes is only appended-to by the JS thread (us), and the
         // audio thread never indexes into ctx->nodes (it traverses via graph edges).
         std::vector<AudioBuffer*> candidateBuffers;
+        size_t deadNodeCount = 0;
 
         auto& nodes = ctx->nodes;
         for (auto it = nodes.begin(); it != nodes.end(); ) {
@@ -251,12 +271,14 @@ namespace PrismaUI::Audio {
                 n->graphOrphaned.load(std::memory_order_acquire)) {
                 if (n->type == AudioNode::Type::BufferSource) {
                     auto* src = static_cast<AudioBufferSourceNode*>(n);
-                    if (src->buffer) {
-                        candidateBuffers.push_back(src->buffer);
-                        src->buffer = nullptr;
+                    AudioBuffer* b = src->buffer.load(std::memory_order_relaxed);
+                    if (b) {
+                        candidateBuffers.push_back(b);
+                        src->buffer.store(nullptr, std::memory_order_relaxed);
                     }
                 }
                 it = nodes.erase(it);
+                ++deadNodeCount;
             } else {
                 ++it;
             }
@@ -274,7 +296,7 @@ namespace PrismaUI::Audio {
             for (auto& n : nodes) {
                 if (n->type == AudioNode::Type::BufferSource) {
                     auto* s = static_cast<AudioBufferSourceNode*>(n.get());
-                    if (s->buffer == deadBuf) {
+                    if (s->buffer.load(std::memory_order_relaxed) == deadBuf) {
                         stillReferenced = true;
                         break;
                     }
@@ -291,8 +313,9 @@ namespace PrismaUI::Audio {
         }
 
         ctx->orphanedNodeCount.store(0, std::memory_order_relaxed);
+        // [017] First arg is dead-node count, second is candidate-buffer count
         logger::debug("[Audio] Collected {} dead nodes, {} candidate buffers",
-                     candidateBuffers.size(), candidateBuffers.size());
+                     deadNodeCount, candidateBuffers.size());
     }
 
 }  // namespace PrismaUI::Audio

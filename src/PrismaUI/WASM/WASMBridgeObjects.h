@@ -12,15 +12,16 @@ namespace PrismaUI::WASM {
     // =========================================================================
 
     struct WASMMemoryData {
-        wasm_module_inst_t moduleInst = nullptr;  // Owning module instance
+        wasm_module_inst_t moduleInst = nullptr;  // Owning module instance (miniInst for standalone)
         wasm_memory_inst_t memoryInst = nullptr;   // WAMR memory handle
-        JSObjectRef cachedBuffer = nullptr;         // Current ArrayBuffer (invalidated on grow)
+        JSObjectRef cachedBuffer = nullptr;         // Current ArrayBuffer (JSValueProtect'd when valid)
         void* cachedBase = nullptr;                 // Base pointer when cachedBuffer was created
         size_t cachedSize = 0;                      // Byte size when cachedBuffer was created
         bool ownsMemory = false;                    // True if constructed standalone (not from an export)
-        // prevent the WASM instance from being GC'd while this memory wrapper exists
+        // JSC context — needed for JSValueProtect/Unprotect on cachedBuffer and instanceRef
         JSContextRef ctx = nullptr;
-        JSObjectRef instanceRef = nullptr;  // JSValueProtect'd (null for standalone)
+        JSObjectRef instanceRef = nullptr;          // JSValueProtect'd (null for standalone)
+        wasm_module_t miniModule = nullptr;         // [060] Standalone: module to unload in finalizer
     };
 
     // =========================================================================
@@ -33,9 +34,10 @@ namespace PrismaUI::WASM {
         uint32_t tableIndex = 0;                    // Table index within the module
         wasm_exec_env_t execEnv = nullptr;          // For calling functions retrieved from table
         bool ownsTable = false;                     // True if constructed standalone
-        // prevent the WASM instance from being GC'd while this table wrapper exists
+        // JSC context — needed for JSValueProtect/Unprotect on instanceRef
         JSContextRef ctx = nullptr;
-        JSObjectRef instanceRef = nullptr;  // JSValueProtect'd (null for standalone)
+        JSObjectRef instanceRef = nullptr;          // JSValueProtect'd (null for standalone)
+        wasm_module_t miniModule = nullptr;         // [061] Standalone: module to unload in finalizer
     };
 
     // =========================================================================

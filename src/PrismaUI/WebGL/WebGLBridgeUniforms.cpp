@@ -6,6 +6,12 @@ namespace PrismaUI::WebGL {
     // Helper: extract numeric array from TypedArray or plain JS Array
     // =========================================================================
 
+    // Returns the JSTypedArrayType expected for element type T.
+    template<typename T> JSTypedArrayType ExpectedTypedArrayType();
+    template<> JSTypedArrayType ExpectedTypedArrayType<GLfloat>() { return kJSTypedArrayTypeFloat32Array; }
+    template<> JSTypedArrayType ExpectedTypedArrayType<GLint>()   { return kJSTypedArrayTypeInt32Array; }
+    template<> JSTypedArrayType ExpectedTypedArrayType<GLuint>()  { return kJSTypedArrayTypeUint32Array; }
+
     template <typename T>
     size_t ExtractNumericArray(JSContextRef ctx, JSValueRef val,
                                T* out, size_t maxCount, const T** directPtr) {
@@ -17,13 +23,18 @@ namespace PrismaUI::WebGL {
         // Try TypedArray fast path first
         JSTypedArrayType arrType = JSValueGetTypedArrayType(ctx, val, nullptr);
         if (arrType != kJSTypedArrayTypeNone) {
-            size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, obj, nullptr);
-            auto* ptr = static_cast<const T*>(GetTypedArrayDataPtr(ctx, obj));
-            if (ptr && byteLen > 0) {
-                *directPtr = ptr;
-                return byteLen / sizeof(T);
+            // Only use the direct-pointer path if the element type matches T exactly.
+            // A mismatch (e.g. Uint8Array for a float uniform) would reinterpret memory
+            // with the wrong stride, producing garbage values.
+            if (arrType == ExpectedTypedArrayType<T>()) {
+                size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, obj, nullptr);
+                auto* ptr = static_cast<const T*>(GetTypedArrayDataPtr(ctx, obj));
+                if (ptr && byteLen > 0) {
+                    *directPtr = ptr;
+                    return byteLen / sizeof(T);
+                }
             }
-            return 0;
+            // Type mismatch: fall through to slow path (reads elements via JSValueToNumber)
         }
 
         // Slow path: plain JS Array (or array-like object with .length)

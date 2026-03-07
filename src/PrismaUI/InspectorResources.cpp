@@ -29,10 +29,10 @@ namespace PrismaUI::Inspector {
             return;
         }
 
-        ReleaseInspectorTexture(viewData);
-
         {
             std::lock_guard bufferLock(viewData->inspectorBufferMutex);
+            ReleaseInspectorTexture(viewData);
+            viewData->inspectorFrameReady.store(false);
             viewData->inspectorPixelBuffer.clear();
             viewData->inspectorPixelBuffer.shrink_to_fit();
             viewData->inspectorBufferWidth = 0;
@@ -40,7 +40,6 @@ namespace PrismaUI::Inspector {
             viewData->inspectorBufferStride = 0;
         }
 
-        viewData->inspectorFrameReady.store(false);
         viewData->inspectorPointerHover.store(false);
     }
 

@@ -64,7 +64,12 @@ namespace PrismaUI::WebGL {
     JSValueRef GL_getShaderInfoLog(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
                                    size_t argc, const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
-        if (!c || !c->initialized || argc < 1) return JSValueMakeString(ctx, JSStringCreateWithUTF8CString(""));
+        if (!c || !c->initialized || argc < 1) {
+            JSStringRef s = JSStringCreateWithUTF8CString("");
+            JSValueRef r = JSValueMakeString(ctx, s);
+            JSStringRelease(s);
+            return r;
+        }
         GLuint shader = GetGLId(ctx, argv[0]);
         GLint logLen = 0;
         glGetShaderiv(shader, GL_INFO_LOG_LENGTH, &logLen);

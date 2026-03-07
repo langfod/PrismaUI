@@ -394,8 +394,18 @@ namespace PrismaUI::WebGL {
 
         float canvasX = static_cast<float>(JSValueToNumber(ctx, argv[1], nullptr));
         float canvasY = static_cast<float>(JSValueToNumber(ctx, argv[2], nullptr));
-        uint32_t width = static_cast<uint32_t>(JSValueToNumber(ctx, argv[3], nullptr));
-        uint32_t height = static_cast<uint32_t>(JSValueToNumber(ctx, argv[4], nullptr));
+        if (std::isnan(canvasX)) canvasX = 0.0f;
+        if (std::isnan(canvasY)) canvasY = 0.0f;
+
+        double wD = JSValueToNumber(ctx, argv[3], nullptr);
+        double hD = JSValueToNumber(ctx, argv[4], nullptr);
+        if (std::isnan(wD) || std::isnan(hD) || wD < 0 || hD < 0 ||
+            wD > 16384 || hD > 16384) {
+            logger::error("[WebGL] Invalid canvas dimensions: {}x{}", wD, hD);
+            return JSValueMakeUndefined(ctx);
+        }
+        uint32_t width = static_cast<uint32_t>(wD);
+        uint32_t height = static_cast<uint32_t>(hD);
         bool visible = JSValueToBoolean(ctx, argv[5]);
 
         // Optional display size args (argv[6], argv[7]) — CSS display dimensions.

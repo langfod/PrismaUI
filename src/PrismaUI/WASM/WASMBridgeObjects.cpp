@@ -457,6 +457,25 @@ namespace PrismaUI::WASM {
         return JSValueMakeNumber(ctx, static_cast<double>(tbl->tableInfo.cur_size));
     }
 
+    // --- Helper: validate a JS value as a table index ---
+
+    static bool ValidateTableIndex(JSContextRef ctx, JSValueRef val,
+                                    uint32_t maxSize, uint32_t& outIndex,
+                                    const char* caller, JSValueRef* exception) {
+        double d = JSValueToNumber(ctx, val, nullptr);
+        if (std::isnan(d) || d < 0 || d >= static_cast<double>(maxSize) ||
+            d != std::floor(d)) {
+            std::string msg = std::string(caller) + ": index out of bounds";
+            JSStringRef errStr = JSStringCreateWithUTF8CString(msg.c_str());
+            JSValueRef errVal = JSValueMakeString(ctx, errStr);
+            JSStringRelease(errStr);
+            *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
+            return false;
+        }
+        outIndex = static_cast<uint32_t>(d);
+        return true;
+    }
+
     // --- Table.prototype.get(index) -> Function|null ---
 
     static JSValueRef WASM_TableGet(JSContextRef ctx, JSObjectRef /*function*/,
@@ -479,14 +498,9 @@ namespace PrismaUI::WASM {
             return JSValueMakeUndefined(ctx);
         }
 
-        uint32_t index = static_cast<uint32_t>(JSValueToNumber(ctx, argv[0], nullptr));
-
-        if (index >= tbl->tableInfo.cur_size) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "Table.get: index out of bounds");
-            JSValueRef errVal = JSValueMakeString(ctx, errStr);
-            JSStringRelease(errStr);
-            *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
+        uint32_t index;
+        if (!ValidateTableIndex(ctx, argv[0], tbl->tableInfo.cur_size, index,
+                                "Table.get", exception)) {
             return JSValueMakeUndefined(ctx);
         }
 
@@ -686,14 +700,9 @@ namespace PrismaUI::WASM {
             return JSValueMakeUndefined(ctx);
         }
 
-        uint32_t index = static_cast<uint32_t>(JSValueToNumber(ctx, argv[0], nullptr));
-
-        if (index >= tbl->tableInfo.cur_size) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "Table.set: index out of bounds");
-            JSValueRef errVal = JSValueMakeString(ctx, errStr);
-            JSStringRelease(errStr);
-            *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
+        uint32_t index;
+        if (!ValidateTableIndex(ctx, argv[0], tbl->tableInfo.cur_size, index,
+                                "Table.set", exception)) {
             return JSValueMakeUndefined(ctx);
         }
 
@@ -1073,6 +1082,9 @@ namespace PrismaUI::WASM {
     static void WASMGlobalFinalize(JSObjectRef obj) {
         auto* data = static_cast<WASMGlobalData*>(JSObjectGetPrivate(obj));
         if (data) {
+            if (data->instanceRef && data->ctx) {
+                JSValueUnprotect(data->ctx, data->instanceRef);
+            }
             delete data;
             RemoveLiveObject();
         }
@@ -1272,10 +1284,16 @@ namespace PrismaUI::WASM {
 
     // --- WrapGlobalExport ---
 
-    JSObjectRef WrapGlobalExport(JSContextRef ctx, const wasm_global_inst_t& globalInfo) {
+    JSObjectRef WrapGlobalExport(JSContextRef ctx, const wasm_global_inst_t& globalInfo,
+                                  JSObjectRef instanceObj) {
         auto* globalData = new WASMGlobalData{};
         globalData->globalInfo = globalInfo;
         globalData->ownsGlobal = false;
+        globalData->ctx = ctx;
+        globalData->instanceRef = instanceObj;
+        if (instanceObj) {
+            JSValueProtect(ctx, instanceObj);
+        }
 
         AddLiveObject();
         return JSObjectMake(ctx, GetWASMGlobalClass(), globalData);

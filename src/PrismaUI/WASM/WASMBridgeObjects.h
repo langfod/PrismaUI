@@ -54,6 +54,9 @@ namespace PrismaUI::WASM {
             float f32Val;
             double f64Val;
         } storage{};
+        // JSC context — needed for JSValueProtect/Unprotect on instanceRef
+        JSContextRef ctx = nullptr;
+        JSObjectRef instanceRef = nullptr;          // JSValueProtect'd (null for standalone)
     };
 
     // =========================================================================
@@ -96,6 +99,7 @@ namespace PrismaUI::WASM {
                                 wasm_exec_env_t execEnv,
                                 JSObjectRef instanceObj);
 
-    JSObjectRef WrapGlobalExport(JSContextRef ctx, const wasm_global_inst_t& globalInfo);
+    JSObjectRef WrapGlobalExport(JSContextRef ctx, const wasm_global_inst_t& globalInfo,
+                                  JSObjectRef instanceObj);
 
 }  // namespace PrismaUI::WASM

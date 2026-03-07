@@ -23,9 +23,11 @@ namespace PrismaUI::Core {
 namespace PrismaUI::ViewManager {
     using namespace ultralight;
 
+    enum class Acceleration { Default, Accelerated };
+
     Core::PrismaViewId Create(const std::string& htmlPath,
                               std::function<void(Core::PrismaViewId)> onDomReadyCallback = nullptr);
-    Core::PrismaViewId Create(const std::string& htmlPath, bool isAccelerated,
+    Core::PrismaViewId Create(const std::string& htmlPath, Acceleration accel,
                               std::function<void(Core::PrismaViewId)> onDomReadyCallback = nullptr);
     void Show(const Core::PrismaViewId& viewId);
     void Hide(const Core::PrismaViewId& viewId);

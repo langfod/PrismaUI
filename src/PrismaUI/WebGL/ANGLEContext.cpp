@@ -361,11 +361,19 @@ namespace PrismaUI::WebGL {
             // Switch to the shared surface for rendering
             EGLSurface oldSurface = ctx->eglSurface;
             ctx->eglSurface = ctx->eglSharedSurface;
-            eglMakeCurrent(g_ANGLEDisplay, ctx->eglSurface, ctx->eglSurface, ctx->eglContext);
-            // Destroy the regular pbuffer — we no longer need it
-            eglDestroySurface(g_ANGLEDisplay, oldSurface);
-            logger::info("[WebGL] Using zero-copy DXGI shared texture path");
-        } else {
+            if (eglMakeCurrent(g_ANGLEDisplay, ctx->eglSurface, ctx->eglSurface, ctx->eglContext)) {
+                eglDestroySurface(g_ANGLEDisplay, oldSurface);
+                logger::info("[WebGL] Using zero-copy DXGI shared texture path");
+            } else {
+                logger::error("[WebGL] eglMakeCurrent failed switching to shared surface, reverting");
+                ctx->eglSurface = oldSurface;
+                eglMakeCurrent(g_ANGLEDisplay, oldSurface, oldSurface, ctx->eglContext);
+                TeardownSharedTexturePath(ctx);
+                ctx->useSharedTexturePath = false;
+            }
+        }
+
+        if (!ctx->useSharedTexturePath) {
             // Fallback: allocate readback buffers for CPU copy path
             size_t bufSize = static_cast<size_t>(width) * height * 4;
             ctx->readbackPixels.resize(bufSize);
@@ -429,14 +437,23 @@ namespace PrismaUI::WebGL {
             ctx->useSharedTexturePath = true;
             EGLSurface oldSurface = ctx->eglSurface;
             ctx->eglSurface = ctx->eglSharedSurface;
-            eglMakeCurrent(g_ANGLEDisplay, ctx->eglSurface, ctx->eglSurface, ctx->eglContext);
-            eglDestroySurface(g_ANGLEDisplay, oldSurface);
-            // Shrink readback buffers since they're not needed
-            ctx->readbackPixels.clear();
-            ctx->readbackPixels.shrink_to_fit();
-            ctx->readbackFlipped.clear();
-            ctx->readbackFlipped.shrink_to_fit();
-        } else {
+            if (eglMakeCurrent(g_ANGLEDisplay, ctx->eglSurface, ctx->eglSurface, ctx->eglContext)) {
+                eglDestroySurface(g_ANGLEDisplay, oldSurface);
+                // Shrink readback buffers since they're not needed
+                ctx->readbackPixels.clear();
+                ctx->readbackPixels.shrink_to_fit();
+                ctx->readbackFlipped.clear();
+                ctx->readbackFlipped.shrink_to_fit();
+            } else {
+                logger::error("[WebGL] ResizeWebGLContext: eglMakeCurrent failed switching to shared surface, reverting");
+                ctx->eglSurface = oldSurface;
+                eglMakeCurrent(g_ANGLEDisplay, oldSurface, oldSurface, ctx->eglContext);
+                TeardownSharedTexturePath(ctx);
+                ctx->useSharedTexturePath = false;
+            }
+        }
+
+        if (!ctx->useSharedTexturePath) {
             // Rebind context with regular pbuffer
             if (!eglMakeCurrent(g_ANGLEDisplay, ctx->eglSurface, ctx->eglSurface, ctx->eglContext)) {
                 logger::error("[WebGL] ResizeWebGLContext: eglMakeCurrent failed: 0x{:X}", eglGetError());
@@ -506,6 +523,16 @@ namespace PrismaUI::WebGL {
 
     void ShutdownANGLE() {
         if (g_ANGLEDisplay != EGL_NO_DISPLAY) {
+            if (!g_activeContexts.empty()) {
+                logger::warn("[WebGL] ShutdownANGLE: {} contexts still active, cleaning up",
+                             g_activeContexts.size());
+                for (auto* ctx : g_activeContexts) {
+                    if (ctx && ctx->eglContext != EGL_NO_CONTEXT) {
+                        eglDestroyContext(g_ANGLEDisplay, ctx->eglContext);
+                    }
+                }
+                g_activeContexts.clear();
+            }
             eglTerminate(g_ANGLEDisplay);
             g_ANGLEDisplay = EGL_NO_DISPLAY;
         }

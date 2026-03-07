@@ -204,7 +204,7 @@ namespace PrismaUI::Audio {
             std::string viewIdStr = JSStringToStd(ctx, viewIdVal);
             auto viewId = static_cast<uint64_t>(std::strtoull(viewIdStr.c_str(), nullptr, 10));
 
-            std::shared_lock lock(Core::viewsMutex);
+            std::unique_lock lock(Core::viewsMutex);
             auto it = Core::views.find(viewId);
             if (it != Core::views.end()) {
                 it->second->audioContext = audioCtx;

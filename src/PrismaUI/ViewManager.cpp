@@ -17,11 +17,12 @@ namespace PrismaUI::ViewManager {
     static std::atomic<bool> g_anyViewHasFocus{false};
 
     Core::PrismaViewId Create(const std::string& htmlPath, std::function<void(Core::PrismaViewId)> onDomReadyCallback) {
-        return Create(htmlPath, false, std::move(onDomReadyCallback));
+        return Create(htmlPath, Acceleration::Default, std::move(onDomReadyCallback));
     }
 
-    Core::PrismaViewId Create(const std::string& htmlPath, bool isAccelerated,
+    Core::PrismaViewId Create(const std::string& htmlPath, Acceleration accel,
                               std::function<void(Core::PrismaViewId)> onDomReadyCallback) {
+        bool isAccelerated = (accel == Acceleration::Accelerated);
         bool expected_init = false;
         if (coreInitialized.compare_exchange_strong(expected_init, true)) {
             Core::InitializeCoreSystem();

@@ -173,25 +173,38 @@ namespace PrismaUI::GPU {
         }
 
         auto& entry = iter->second;
-        D3D11_MAPPED_SUBRESOURCE res;
-        HRESULT hr = m_Context->Map(entry.Texture.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &res);
-        if (FAILED(hr)) {
-            logger::error("GPUDriverD3D11::UpdateTexture: Map failed. HR={:#X}", hr);
-            return;
-        }
 
-        if (res.RowPitch == bitmap->row_bytes()) {
-            memcpy(res.pData, bitmap->LockPixels(), bitmap->size());
-            bitmap->UnlockPixels();
+        D3D11_TEXTURE2D_DESC desc;
+        entry.Texture->GetDesc(&desc);
+
+        if (desc.Usage == D3D11_USAGE_DYNAMIC) {
+            D3D11_MAPPED_SUBRESOURCE res;
+            HRESULT hr = m_Context->Map(entry.Texture.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &res);
+            if (FAILED(hr)) {
+                logger::error("GPUDriverD3D11::UpdateTexture: Map failed. HR={:#X}", hr);
+                return;
+            }
+
+            if (res.RowPitch == bitmap->row_bytes()) {
+                memcpy(res.pData, bitmap->LockPixels(), bitmap->size());
+                bitmap->UnlockPixels();
+            } else {
+                ultralight::RefPtr<ultralight::Bitmap> mapped_bitmap =
+                    ultralight::Bitmap::Create(bitmap->width(), bitmap->height(), bitmap->format(), res.RowPitch, res.pData,
+                                               res.RowPitch * bitmap->height(), false);
+                ultralight::IntRect dest_rect = {0, 0, (int)bitmap->width(), (int)bitmap->height()};
+                mapped_bitmap->DrawBitmap(dest_rect, dest_rect, bitmap, false);
+            }
+
+            m_Context->Unmap(entry.Texture.Get(), 0);
         } else {
-            ultralight::RefPtr<ultralight::Bitmap> mapped_bitmap =
-                ultralight::Bitmap::Create(bitmap->width(), bitmap->height(), bitmap->format(), res.RowPitch, res.pData,
-                                           res.RowPitch * bitmap->height(), false);
-            ultralight::IntRect dest_rect = {0, 0, (int)bitmap->width(), (int)bitmap->height()};
-            mapped_bitmap->DrawBitmap(dest_rect, dest_rect, bitmap, false);
+            // DEFAULT texture (render target): use UpdateSubresource instead of Map
+            void* pixels = bitmap->LockPixels();
+            m_Context->UpdateSubresource(
+                entry.Texture.Get(), 0, nullptr,
+                pixels, bitmap->row_bytes(), 0);
+            bitmap->UnlockPixels();
         }
-
-        m_Context->Unmap(entry.Texture.Get(), 0);
     }
 
     void GPUDriverD3D11::DestroyTexture(uint32_t textureId) {

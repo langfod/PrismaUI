@@ -73,7 +73,7 @@ namespace PrismaUI::Audio {
         // The output sink — always the first node created, never null while context lives.
         AudioDestinationNode* destinationNode = nullptr;
 
-        bool destroyed = false;
+        std::atomic<bool> destroyed{false};
     };
 
     // Create a new AudioContext with a standalone XAudio2 engine and mastering voice.

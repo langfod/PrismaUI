@@ -136,7 +136,11 @@
         var entry = { nativeNode: nativeNode, onended: null };
 
         nativeNode.start = function(when, offset, duration) {
-            origStart(when || 0, offset || 0, duration || -1);
+            if (duration !== undefined && duration !== null && duration >= 0) {
+                origStart(when || 0, offset || 0, duration);
+            } else {
+                origStart(when || 0, offset || 0);
+            }
             self._activeSources.push(entry);
         };
 

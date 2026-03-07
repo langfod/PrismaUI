@@ -274,8 +274,8 @@ namespace PrismaUI::Listeners {
     MyViewListener::~MyViewListener() = default;
 
     void MyViewListener::OnAddConsoleMessage([[maybe_unused]] View* caller, [[maybe_unused]] const ConsoleMessage& message) {
-        //auto callerUrl = caller ? caller->url().utf8().data() : "unknown";
-        //logger::info("View [{}] on {}: JSConsole: {}", viewId_, callerUrl, message.message().utf8().data());
+        auto callerUrl = caller ? caller->url().utf8().data() : "unknown";
+        logger::info("View [{}] on {}: JSConsole: {}", viewId_, callerUrl, message.message().utf8().data());
 
         std::shared_lock lock(viewsMutex);
         auto it = views.find(viewId_);

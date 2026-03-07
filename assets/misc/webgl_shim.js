@@ -120,8 +120,8 @@
         if (x === 0 && y === 0) {
             var sl = parseFloat(canvas.style.left);
             var st = parseFloat(canvas.style.top);
-            if (sl > 0) x = sl;
-            if (st > 0) y = st;
+            if (isFinite(sl)) x = sl;
+            if (isFinite(st)) y = st;
         }
 
         // Debug: log all sources so we can diagnose position issues

@@ -189,7 +189,7 @@ namespace PrismaUI::Audio {
     }
 
     void ResumeAudioContext(AudioContext* ctx) {
-        if (!ctx || ctx->destroyed) return;
+        if (!ctx || ctx->destroyed.load(std::memory_order_acquire)) return;
         if (ctx->state.load(std::memory_order_acquire) == AudioContextState::Suspended) {
             ctx->state.store(AudioContextState::Running, std::memory_order_release);
 
@@ -203,6 +203,7 @@ namespace PrismaUI::Audio {
             if (FAILED(hr)) {
                 logger::error("[Audio] IXAudio2SourceVoice::Start() failed: {:08X}",
                               static_cast<uint32_t>(hr));
+                ctx->state.store(AudioContextState::Suspended, std::memory_order_release);
             }
 
             logger::debug("[Audio] AudioContext resumed (XAudio2)");
@@ -210,7 +211,7 @@ namespace PrismaUI::Audio {
     }
 
     void SuspendAudioContext(AudioContext* ctx) {
-        if (!ctx || ctx->destroyed) return;
+        if (!ctx || ctx->destroyed.load(std::memory_order_acquire)) return;
         if (ctx->state.load(std::memory_order_acquire) == AudioContextState::Running) {
             ctx->xaOutput.sourceVoice->Stop();
             ctx->xaOutput.sourceVoice->FlushSourceBuffers();
@@ -220,8 +221,8 @@ namespace PrismaUI::Audio {
     }
 
     void DestroyAudioContext(AudioContext* ctx) {
-        if (!ctx || ctx->destroyed) return;
-        ctx->destroyed = true;
+        if (!ctx || ctx->destroyed.load(std::memory_order_acquire)) return;
+        ctx->destroyed.store(true, std::memory_order_release);
 
         // [016] Signal the audio callback to stop re-entering before touching the voice.
         // OnBufferEnd checks this flag first; DestroyVoice() then blocks until any

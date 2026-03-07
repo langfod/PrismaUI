@@ -19,7 +19,7 @@ set(CMAKE_JOB_POOL_COMPILE compile)
 set(CMAKE_JOB_POOL_LINK link)
 set(CMAKE_INSTALL_MESSAGE LAZY)
 
-project(PrismaUI VERSION 1.5.5 LANGUAGES CXX)
+project(PrismaUI VERSION 1.5.6 LANGUAGES CXX)
 
 # Set build root for external builds
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")

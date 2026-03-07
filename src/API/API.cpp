@@ -252,5 +252,5 @@ PrismaView PluginAPI::PrismaUIInterface::CreateViewAccelerated(const char* htmlP
         return 0;
     }
 
-    return PrismaUI::ViewManager::Create(htmlPath, true, WrapDomReadyCallback(onDomReadyCallback));
+    return PrismaUI::ViewManager::Create(htmlPath, PrismaUI::ViewManager::Acceleration::Accelerated, WrapDomReadyCallback(onDomReadyCallback));
 }

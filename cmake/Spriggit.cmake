@@ -1,4 +1,4 @@
-# GamePlugin.cmake
+# Spriggit.cmake
 # Configures Spriggit serialization (text format -> .esp binary plugin)
 
 # Early exit if DIST_VERSION_DIR is not defined

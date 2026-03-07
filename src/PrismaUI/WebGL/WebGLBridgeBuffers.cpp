@@ -81,7 +81,9 @@ namespace PrismaUI::WebGL {
             if (arrType != kJSTypedArrayTypeNone) {
                 size_t byteLen = JSObjectGetTypedArrayByteLength(ctx, dataObj, nullptr);
                 void* ptr = GetTypedArrayDataPtr(ctx, dataObj);
-                glBufferSubData(target, offset, static_cast<GLsizeiptr>(byteLen), ptr);
+                if (ptr && byteLen > 0) {
+                    glBufferSubData(target, offset, static_cast<GLsizeiptr>(byteLen), ptr);
+                }
             } else {
                 // Plain ArrayBuffer
                 size_t byteLen = JSObjectGetArrayBufferByteLength(ctx, dataObj, nullptr);

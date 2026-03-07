@@ -189,8 +189,8 @@ namespace PrismaUI::WebGL {
                     return fmt::format("({},{},{},{})", pixels[idx], pixels[idx+1], pixels[idx+2], pixels[idx+3]);
                 return "(OOB)";
             };
-            logger::info("[WebGL-DBG] Readback frame 30 pixels (RGBA): [0,0]={} [80,72]={} [150,75]={}",
-                px(0, 0), px(80, 72), px(w/2, h/2));
+            logger::info("[WebGL-DBG] Readback frame 30 pixels (RGBA): [0,0]={} [80,72]={} [{},{}]={}",
+                px(0, 0), px(80, 72), w/2, h/2, px(w/2, h/2));
         }
     }
 

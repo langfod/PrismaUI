@@ -85,7 +85,7 @@ namespace PrismaUI::SIMD {
             g_ActiveInstructionSet = InstructionSet::AVX;
             CopyPixels = AVX::CopyPixels;
             FastMemcpy = AVX::FastMemcpy;
-            // AVX implies SSSE3; use the SSSE3-based swizzle from SSE2 namespace
+            // AVX implies SSSE3; use the AVX-optimized swizzle
             SwizzleFlipPixels = AVX::SwizzleFlipPixels;
             logger::info("SIMDDispatch: Using AVX implementations");
         } else if (cpuinfo_has_x86_sse2()) {

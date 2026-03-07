@@ -299,7 +299,7 @@ namespace PrismaUI::Audio {
         }
 
         JSObjectRef float32Array = JSObjectMakeTypedArrayWithArrayBufferAndOffset(
-            ctx, kJSTypedArrayTypeFloat32Array, arrayBuffer, 0, buf->length, nullptr);
+            ctx, kJSTypedArrayTypeFloat32Array, arrayBuffer, 0, numFloats, nullptr);
 
         return float32Array ? float32Array : JSValueMakeNull(ctx);
     }
@@ -314,6 +314,9 @@ namespace PrismaUI::Audio {
         uint32_t offset = (argc > 2) ? static_cast<uint32_t>(JSValueToNumber(ctx, argv[2], nullptr)) : 0;
 
         if (!destArray || ch >= buf->numberOfChannels) return JSValueMakeUndefined(ctx);
+
+        JSTypedArrayType arrType = JSValueGetTypedArrayType(ctx, destArray, nullptr);
+        if (arrType != kJSTypedArrayTypeFloat32Array) return JSValueMakeUndefined(ctx);
 
         size_t destLen = JSObjectGetTypedArrayLength(ctx, destArray, nullptr);
         void* destPtr = JSObjectGetTypedArrayBytesPtr(ctx, destArray, nullptr);
@@ -342,6 +345,9 @@ namespace PrismaUI::Audio {
         uint32_t offset = (argc > 2) ? static_cast<uint32_t>(JSValueToNumber(ctx, argv[2], nullptr)) : 0;
 
         if (!srcArray || ch >= buf->numberOfChannels) return JSValueMakeUndefined(ctx);
+
+        JSTypedArrayType arrType = JSValueGetTypedArrayType(ctx, srcArray, nullptr);
+        if (arrType != kJSTypedArrayTypeFloat32Array) return JSValueMakeUndefined(ctx);
 
         size_t srcLen = JSObjectGetTypedArrayLength(ctx, srcArray, nullptr);
         void* srcPtr = JSObjectGetTypedArrayBytesPtr(ctx, srcArray, nullptr);

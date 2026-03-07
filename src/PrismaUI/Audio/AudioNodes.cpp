@@ -110,10 +110,13 @@ namespace PrismaUI::Audio {
     }
 
     // ---- AudioBufferSourceNode ----
-    void AudioBufferSourceNode::Start(double when, double offset, double /*duration*/) {
+    void AudioBufferSourceNode::Start(double when, double offset, double duration) {
         if (started.load(std::memory_order_relaxed)) return;  // Can only be started once (per spec)
         startTime.store(when, std::memory_order_relaxed);
         startOffset = offset;
+        if (duration >= 0.0) {
+            playbackDuration.store(duration, std::memory_order_relaxed);
+        }
         AudioBuffer* buf = buffer.load(std::memory_order_relaxed);
         if (buf && offset > 0.0) {
             playbackPosition = static_cast<uint64_t>(offset * buf->sampleRate);
@@ -158,9 +161,17 @@ namespace PrismaUI::Audio {
         // Load atomic params once per render block to avoid repeated atomic reads in the hot loop
         const double nodeStartTime = startTime.load(std::memory_order_relaxed);
         const double nodeStopTime  = stopTime.load(std::memory_order_relaxed);
+        const double nodeDuration  = playbackDuration.load(std::memory_order_relaxed);
         const bool   nodeLoop      = loop.load(std::memory_order_relaxed);
         const double nodeLoopStart = loopStart.load(std::memory_order_relaxed);
         const double nodeLoopEnd   = loopEnd.load(std::memory_order_relaxed);
+
+        // Compute duration end sample (relative to startOffset in the buffer)
+        uint64_t durationEndSample = UINT64_MAX;
+        if (nodeDuration >= 0.0) {
+            uint64_t offsetSample = static_cast<uint64_t>(startOffset * buf->sampleRate);
+            durationEndSample = offsetSample + static_cast<uint64_t>(nodeDuration * buf->sampleRate);
+        }
 
         // Determine loop boundaries
         uint64_t loopStartSample = 0;
@@ -194,6 +205,15 @@ namespace PrismaUI::Audio {
                 ended = true;
                 endedEventPending = true;
                 // Fill remaining with silence
+                std::memset(outL + i, 0, (numFrames - i) * sizeof(float));
+                std::memset(outR + i, 0, (numFrames - i) * sizeof(float));
+                break;
+            }
+
+            // Check duration limit
+            if (playbackPosition >= durationEndSample) {
+                ended = true;
+                endedEventPending = true;
                 std::memset(outL + i, 0, (numFrames - i) * sizeof(float));
                 std::memset(outR + i, 0, (numFrames - i) * sizeof(float));
                 break;

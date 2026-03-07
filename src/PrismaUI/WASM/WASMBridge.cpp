@@ -655,7 +655,7 @@ namespace PrismaUI::WASM {
             else if (exportInfo.kind == WASM_IMPORT_EXPORT_KIND_GLOBAL) {
                 wasm_global_inst_t globalInfo{};
                 if (wasm_runtime_get_export_global_inst(instData->moduleInst, exportInfo.name, &globalInfo)) {
-                    JSObjectRef globalObj = WrapGlobalExport(ctx, globalInfo);
+                    JSObjectRef globalObj = WrapGlobalExport(ctx, globalInfo, instanceObj);
                     JSStringRef propName = JSStringCreateWithUTF8CString(exportInfo.name);
                     JSObjectSetProperty(ctx, exportsObj, propName, globalObj,
                                         kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete,

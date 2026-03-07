@@ -5,6 +5,45 @@
 
 namespace PrismaUI::WebGL {
 
+    // Helper: compute bytes per pixel for a GL format+type combination.
+    static size_t GetBytesPerPixel(GLenum format, GLenum type) {
+        size_t channels = 0;
+        switch (format) {
+            case GL_RGBA:           channels = 4; break;
+            case GL_RGB:            channels = 3; break;
+            case GL_LUMINANCE_ALPHA:
+            case GL_RG:             channels = 2; break;
+            case GL_LUMINANCE:
+            case GL_ALPHA:
+            case GL_RED:            channels = 1; break;
+            case GL_RGBA_INTEGER:   channels = 4; break;
+            case GL_RGB_INTEGER:    channels = 3; break;
+            case GL_RG_INTEGER:     channels = 2; break;
+            case GL_RED_INTEGER:    channels = 1; break;
+            default:                channels = 4; break;
+        }
+
+        switch (type) {
+            case GL_UNSIGNED_BYTE:
+            case GL_BYTE:                   return channels;
+            case GL_UNSIGNED_SHORT:
+            case GL_SHORT:
+            case GL_HALF_FLOAT:             return channels * 2;
+            case GL_UNSIGNED_INT:
+            case GL_INT:
+            case GL_FLOAT:                  return channels * 4;
+            case GL_UNSIGNED_SHORT_5_6_5:
+            case GL_UNSIGNED_SHORT_4_4_4_4:
+            case GL_UNSIGNED_SHORT_5_5_5_1: return 2;
+            case GL_UNSIGNED_INT_2_10_10_10_REV:
+            case GL_UNSIGNED_INT_10F_11F_11F_REV:
+            case GL_UNSIGNED_INT_5_9_9_9_REV:
+            case GL_UNSIGNED_INT_24_8:      return 4;
+            case GL_FLOAT_32_UNSIGNED_INT_24_8_REV: return 8;
+            default:                        return channels;
+        }
+    }
+
     // =========================================================================
     // Textures
     // =========================================================================
@@ -252,6 +291,13 @@ namespace PrismaUI::WebGL {
             JSObjectRef dataObj = JSValueToObject(ctx, argv[6], nullptr);
             void* ptr = GetTypedArrayDataPtr(ctx, dataObj);
             if (ptr) {
+                size_t bytesPerPixel = GetBytesPerPixel(format, type);
+                size_t requiredBytes = static_cast<size_t>(width) * height * bytesPerPixel;
+                size_t bufferBytes = JSObjectGetTypedArrayByteLength(ctx, dataObj, nullptr);
+                if (requiredBytes > bufferBytes) {
+                    logger::warn("[WebGL] readPixels: buffer too small ({} < {})", bufferBytes, requiredBytes);
+                    return JSValueMakeUndefined(ctx);
+                }
                 glReadPixels(x, y, width, height, format, type, ptr);
             }
         }

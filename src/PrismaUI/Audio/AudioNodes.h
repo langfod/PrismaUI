@@ -42,6 +42,7 @@ namespace PrismaUI::Audio {
         std::atomic<bool> ended{false};
         std::atomic<double> startTime{0.0};
         std::atomic<double> stopTime{-1.0};  // Negative means no stop scheduled
+        std::atomic<double> playbackDuration{-1.0}; // Negative means no duration limit
         double startOffset = 0.0;            // Only used in Start(), guarded by started fence
         uint64_t playbackPosition = 0;       // Audio-thread-only after Start()
 

@@ -3,6 +3,8 @@
 #include "Communication.h"
 #include "Core.h"
 #include "PrismaUI_API.h"
+#include "Audio/AudioBridge.h"
+#include "Audio/AudioShim.h"
 #include "Stubs/WebAudioStub.h"
 #include "WASM/WASMBridge.h"
 #include "WebGL/WebGLBridge.h"
@@ -32,28 +34,53 @@ namespace PrismaUI::Listeners {
 
     // Helper: inject browser API stubs + WebGL shim + native bindings into the main frame.
     // Also stores the shim source on window.__prismaShimSource for iframe propagation.
+    // WebGL and WASM bindings are only injected for accelerated views (CreateViewAccelerated).
     static void InjectWebGLIntoMainFrame(View* caller, Core::PrismaViewId viewId) {
-        // Inject browser API stubs before any page scripts run
-        const char* audioStubJS = Stubs::GetWebAudioStubJS();
-        if (audioStubJS && audioStubJS[0]) {
-            caller->EvaluateScript(String(audioStubJS), nullptr, String(""));
+        bool isAccelerated = false;
+        {
+            std::shared_lock lock(Core::viewsMutex);
+            auto it = Core::views.find(viewId);
+            if (it != Core::views.end())
+                isAccelerated = it->second->isAccelerated;
         }
 
-        const auto& shimJS = WebGL::GetShimJS();
-        if (!shimJS.empty()) {
-            caller->EvaluateScript(String(shimJS.c_str()), nullptr, String(""));
+        // Inject Web Audio shim (replaces the old no-op stub)
+        const auto& audioShimJS = Audio::GetAudioShimJS();
+        if (!audioShimJS.empty()) {
+            caller->EvaluateScript(String(audioShimJS.c_str()), nullptr, String(""));
 
-            // Store shim source on window so subframe injection can access it.
-            std::string escaped = EscapeForJSString(shimJS);
-            std::string storeScript = "window.__prismaShimSource = '" + escaped + "';";
-            caller->EvaluateScript(String(storeScript.c_str()), nullptr, String(""));
+            // Store audio shim source on window for subframe propagation
+            std::string escapedAudio = EscapeForJSString(audioShimJS);
+            std::string storeAudioScript = "window.__prismaAudioShimSource = '" + escapedAudio + "';";
+            caller->EvaluateScript(String(storeAudioScript.c_str()), nullptr, String(""));
+        } else {
+            // Fallback to no-op stub if shim file not found
+            const char* audioStubJS = Stubs::GetWebAudioStubJS();
+            if (audioStubJS && audioStubJS[0]) {
+                caller->EvaluateScript(String(audioStubJS), nullptr, String(""));
+            }
+        }
+
+        if (isAccelerated) {
+            const auto& shimJS = WebGL::GetShimJS();
+            if (!shimJS.empty()) {
+                caller->EvaluateScript(String(shimJS.c_str()), nullptr, String(""));
+
+                // Store shim source on window so subframe injection can access it.
+                std::string escaped = EscapeForJSString(shimJS);
+                std::string storeScript = "window.__prismaShimSource = '" + escaped + "';";
+                caller->EvaluateScript(String(storeScript.c_str()), nullptr, String(""));
+            }
         }
 
         auto scoped_context = caller->LockJSContext(String(""));
         if (scoped_context) {
             JSContextRef ctx = (*scoped_context);
-            WebGL::InjectWebGLBindings(ctx, viewId);
-            WASM::InjectWASMBindings(ctx, viewId);
+            if (isAccelerated) {
+                WebGL::InjectWebGLBindings(ctx, viewId);
+                WASM::InjectWASMBindings(ctx, viewId);
+            }
+            Audio::InjectAudioBindings(ctx, viewId);
         }
     }
 
@@ -155,6 +182,8 @@ namespace PrismaUI::Listeners {
                                     cw.webkitAudioContext = webkitAudioContext;
                                 if (typeof Audio !== 'undefined')
                                     cw.Audio = Audio;
+                                if (typeof __prismaCreateAudioContext === 'function')
+                                    cw.__prismaCreateAudioContext = __prismaCreateAudioContext;
                                 cw.eval(shimSrc);
                                 return 'injected';
                             }
@@ -208,7 +237,14 @@ namespace PrismaUI::Listeners {
 
             logger::info("View [{}]: LoadListener: Subframe window object ready, URL: {}", viewId_, urlStr);
 
-            if (!InjectWebGLIntoSubframeViaMainFrame(caller, viewId_, urlStr)) {
+            bool isAccelerated = false;
+            {
+                std::shared_lock lock(Core::viewsMutex);
+                auto it = Core::views.find(viewId_);
+                if (it != Core::views.end())
+                    isAccelerated = it->second->isAccelerated;
+            }
+            if (isAccelerated && !InjectWebGLIntoSubframeViaMainFrame(caller, viewId_, urlStr)) {
                 logger::warn("View [{}]: Could not inject into subframe URL: {}", viewId_, urlStr);
             }
         }
@@ -236,7 +272,7 @@ namespace PrismaUI::Listeners {
 
     void MyViewListener::OnAddConsoleMessage([[maybe_unused]] View* caller, [[maybe_unused]] const ConsoleMessage& message) {
         auto callerUrl = caller ? caller->url().utf8().data() : "unknown";
-        logger::info("View [{}] on {}: JSConsole: {}", viewId_, callerUrl, message.message().utf8().data());
+        //logger::info("View [{}] on {}: JSConsole: {}", viewId_, callerUrl, message.message().utf8().data());
 
         std::shared_lock lock(viewsMutex);
         auto it = views.find(viewId_);

@@ -2,7 +2,8 @@
 
 WebGL 1.0 implementation status for PrismaUI's ANGLE-based WebGL bridge.
 
-**Coverage: 87 / 131 methods (~66%)**
+**WebGL 1.0 Coverage: 129 / 131 methods (~98%)**
+**WebGL 2.0 Coverage: ~80 new methods implemented**
 
 The implemented subset targets THREE.js and common WebGL tutorials. Functions
 marked "full" are direct pass-throughs to ANGLE's GLES2 backend with no known
@@ -14,7 +15,7 @@ limitations.
 
 | Method | Status | Notes |
 |---|---|---|
-| `getContextAttributes` | -- | |
+| `getContextAttributes` | **Yes** | Hardcoded attributes matching EGL config. |
 | `isContextLost` | **Yes** | Always returns `false`; does not track actual device loss. |
 | `getSupportedExtensions` | **Yes** | Hardcoded list (OES_element_index_uint, OES_standard_derivatives, OES_texture_float, OES_texture_half_float, WEBGL_depth_texture, WEBGL_lose_context). |
 | `getExtension` | **Yes** | Returns empty object for known extensions; no extension-specific methods. |
@@ -51,18 +52,18 @@ limitations.
 | `frontFace` | **Yes** | Full. |
 | `getError` | **Yes** | Full. |
 | `getParameter` | **Yes** | Covers common pnames (strings, ints, booleans, typed arrays). Unknown pnames fall through to `glGetIntegerv`. |
-| `hint` | -- | |
-| `isEnabled` | -- | |
+| `hint` | **Yes** | Full. |
+| `isEnabled` | **Yes** | Full. |
 | `lineWidth` | **Yes** | Full (many drivers clamp to 1.0). |
 | `pixelStorei` | **Yes** | Full. |
 | `polygonOffset` | **Yes** | Full. |
-| `sampleCoverage` | -- | |
+| `sampleCoverage` | **Yes** | Full. |
 | `stencilFunc` | **Yes** | Full. |
-| `stencilFuncSeparate` | -- | |
+| `stencilFuncSeparate` | **Yes** | Full. |
 | `stencilMask` | **Yes** | Full. |
-| `stencilMaskSeparate` | -- | |
+| `stencilMaskSeparate` | **Yes** | Full. |
 | `stencilOp` | **Yes** | Full. |
-| `stencilOpSeparate` | -- | |
+| `stencilOpSeparate` | **Yes** | Full. |
 
 ## Buffers
 
@@ -73,8 +74,8 @@ limitations.
 | `bufferSubData` | **Yes** | TypedArray input only; plain ArrayBuffer not handled. |
 | `createBuffer` | **Yes** | Full. |
 | `deleteBuffer` | **Yes** | Full. |
-| `getBufferParameter` | -- | |
-| `isBuffer` | -- | |
+| `getBufferParameter` | **Yes** | Full. |
+| `isBuffer` | **Yes** | Full. |
 
 ## Framebuffers
 
@@ -86,8 +87,8 @@ limitations.
 | `deleteFramebuffer` | **Yes** | Full. |
 | `framebufferRenderbuffer` | **Yes** | Full. |
 | `framebufferTexture2D` | **Yes** | Full. |
-| `getFramebufferAttachmentParameter` | -- | |
-| `isFramebuffer` | -- | |
+| `getFramebufferAttachmentParameter` | **Yes** | Full. |
+| `isFramebuffer` | **Yes** | Full. |
 
 ## Renderbuffers
 
@@ -96,8 +97,8 @@ limitations.
 | `bindRenderbuffer` | **Yes** | Full. |
 | `createRenderbuffer` | **Yes** | Full. |
 | `deleteRenderbuffer` | **Yes** | Full. |
-| `getRenderbufferParameter` | -- | |
-| `isRenderbuffer` | -- | |
+| `getRenderbufferParameter` | **Yes** | Full. |
+| `isRenderbuffer` | **Yes** | Full. |
 | `renderbufferStorage` | **Yes** | Full. |
 
 ## Textures
@@ -107,13 +108,13 @@ limitations.
 | `bindTexture` | **Yes** | Full. |
 | `compressedTexImage2D` | -- | |
 | `compressedTexSubImage2D` | -- | |
-| `copyTexImage2D` | -- | |
-| `copyTexSubImage2D` | -- | |
+| `copyTexImage2D` | **Yes** | Full. |
+| `copyTexSubImage2D` | **Yes** | Full. |
 | `createTexture` | **Yes** | Full. |
 | `deleteTexture` | **Yes** | Full. |
 | `generateMipmap` | **Yes** | Full. |
-| `getTexParameter` | -- | |
-| `isTexture` | -- | |
+| `getTexParameter` | **Yes** | Full. |
+| `isTexture` | **Yes** | Full. |
 | `texImage2D` | **Yes\*** | 9-arg overload only (raw pixel data). HTMLImageElement / HTMLCanvasElement / ImageData source overloads not supported. |
 | `texSubImage2D` | **Yes\*** | 9-arg overload only (raw pixel data). Image source overloads not supported. |
 | `texParameterf` | **Yes** | Full. |
@@ -130,16 +131,16 @@ limitations.
 | `createShader` | **Yes** | Full. |
 | `deleteProgram` | **Yes** | Full. |
 | `deleteShader` | **Yes** | Full. |
-| `detachShader` | -- | |
-| `getAttachedShaders` | -- | |
+| `detachShader` | **Yes** | Full. |
+| `getAttachedShaders` | **Yes** | Full. Returns array of WebGLShader wrapper objects. |
 | `getProgramParameter` | **Yes** | Returns boolean for LINK/VALIDATE/DELETE_STATUS, number otherwise. |
 | `getProgramInfoLog` | **Yes** | Full. |
 | `getShaderParameter` | **Yes** | Returns boolean for COMPILE/DELETE_STATUS, number otherwise. |
 | `getShaderInfoLog` | **Yes** | Full. |
 | `getShaderPrecisionFormat` | **Yes\*** | Stub; queries ANGLE but returns object with only `_id=0` instead of real rangeMin/rangeMax/precision. |
-| `getShaderSource` | -- | |
-| `isProgram` | -- | |
-| `isShader` | -- | |
+| `getShaderSource` | **Yes** | Full. |
+| `isProgram` | **Yes** | Full. |
+| `isShader` | **Yes** | Full. |
 | `linkProgram` | **Yes** | Full. |
 | `shaderSource` | **Yes** | Full. |
 | `useProgram` | **Yes** | Full. |
@@ -154,37 +155,37 @@ limitations.
 | `getActiveAttrib` | **Yes\*** | Returns plain `{size, type, name}` object; `instanceof WebGLActiveInfo` is false. |
 | `getActiveUniform` | **Yes\*** | Same as getActiveAttrib. |
 | `getAttribLocation` | **Yes** | Full. |
-| `getUniform` | -- | |
+| `getUniform` | **Yes** | Supports all uniform types (float/int/bool scalars, vectors, matrices, samplers). |
 | `getUniformLocation` | **Yes** | Full. Returns null for loc < 0. |
-| `getVertexAttrib` | -- | |
-| `getVertexAttribOffset` | -- | |
+| `getVertexAttrib` | **Yes** | Supports all pnames including CURRENT_VERTEX_ATTRIB and BUFFER_BINDING. |
+| `getVertexAttribOffset` | **Yes** | Full. |
 | `uniform1f` | **Yes** | Full. |
 | `uniform1fv` | **Yes\*** | TypedArray only; plain JS Array not accepted. |
 | `uniform1i` | **Yes** | Full. |
 | `uniform1iv` | **Yes\*** | TypedArray only. |
 | `uniform2f` | **Yes** | Full. |
 | `uniform2fv` | **Yes\*** | TypedArray only. |
-| `uniform2i` | -- | |
-| `uniform2iv` | -- | |
+| `uniform2i` | **Yes** | Full. |
+| `uniform2iv` | **Yes\*** | TypedArray only. |
 | `uniform3f` | **Yes** | Full. |
 | `uniform3fv` | **Yes\*** | TypedArray only. |
-| `uniform3i` | -- | |
-| `uniform3iv` | -- | |
+| `uniform3i` | **Yes** | Full. |
+| `uniform3iv` | **Yes\*** | TypedArray only. |
 | `uniform4f` | **Yes** | Full. |
 | `uniform4fv` | **Yes\*** | TypedArray only. |
-| `uniform4i` | -- | |
-| `uniform4iv` | -- | |
+| `uniform4i` | **Yes** | Full. |
+| `uniform4iv` | **Yes\*** | TypedArray only. |
 | `uniformMatrix2fv` | **Yes\*** | TypedArray only. |
 | `uniformMatrix3fv` | **Yes\*** | TypedArray only. |
 | `uniformMatrix4fv` | **Yes\*** | TypedArray only. |
-| `vertexAttrib1f` | -- | |
-| `vertexAttrib1fv` | -- | |
-| `vertexAttrib2f` | -- | |
-| `vertexAttrib2fv` | -- | |
-| `vertexAttrib3f` | -- | |
-| `vertexAttrib3fv` | -- | |
-| `vertexAttrib4f` | -- | |
-| `vertexAttrib4fv` | -- | |
+| `vertexAttrib1f` | **Yes** | Full. |
+| `vertexAttrib1fv` | **Yes\*** | TypedArray only. |
+| `vertexAttrib2f` | **Yes** | Full. |
+| `vertexAttrib2fv` | **Yes\*** | TypedArray only. |
+| `vertexAttrib3f` | **Yes** | Full. |
+| `vertexAttrib3fv` | **Yes\*** | TypedArray only. |
+| `vertexAttrib4f` | **Yes** | Full. |
+| `vertexAttrib4fv` | **Yes\*** | TypedArray only. |
 | `vertexAttribPointer` | **Yes** | Full. |
 
 ## Drawing
@@ -201,7 +202,7 @@ limitations.
 
 | Method | Status | Notes |
 |---|---|---|
-| `readPixels` | -- | |
+| `readPixels` | **Yes** | Full. Writes directly into typed array backing buffer. |
 
 ---
 
@@ -232,31 +233,237 @@ limitations.
 
 ---
 
-## Not Yet Implemented (44 methods)
+## Not Yet Implemented (2 methods)
 
-### Introspection / Query
-`getContextAttributes`, `hint`, `isEnabled`, `getBufferParameter`, `isBuffer`,
-`getFramebufferAttachmentParameter`, `isFramebuffer`,
-`getRenderbufferParameter`, `isRenderbuffer`, `getTexParameter`, `isTexture`,
-`getAttachedShaders`, `getShaderSource`, `isProgram`, `isShader`, `getUniform`,
-`getVertexAttrib`, `getVertexAttribOffset`, `readPixels`
+### Texture Compressed
+`compressedTexImage2D`, `compressedTexSubImage2D`
 
-### Stencil (separate face)
-`stencilFuncSeparate`, `stencilMaskSeparate`, `stencilOpSeparate`
+#### What's Needed
 
-### Misc State
-`sampleCoverage`
+**C++ bridge work** (same 3 touch-points as every other method):
 
-### Texture Copy / Compressed
-`compressedTexImage2D`, `compressedTexSubImage2D`, `copyTexImage2D`,
-`copyTexSubImage2D`
+1. **`GL_compressedTexImage2D`** in `WebGLBridgeTextures.cpp`
+   - Signature: `compressedTexImage2D(target, level, internalformat, width, height, border, data)`
+   - Extract 6 numeric args + a typed array for `data`
+   - Get the byte length from `JSObjectGetTypedArrayByteLength` (used as `imageSize`)
+   - Get the data pointer from `JSObjectGetTypedArrayBytesPtr`
+   - Call `glCompressedTexImage2D(target, level, internalformat, width, height, border, imageSize, ptr)`
 
-### Shader
-`detachShader`
+2. **`GL_compressedTexSubImage2D`** in `WebGLBridgeTextures.cpp`
+   - Signature: `compressedTexSubImage2D(target, level, xoffset, yoffset, width, height, format, data)`
+   - Extract 7 numeric args + a typed array for `data`
+   - Call `glCompressedTexSubImage2D(target, level, xoffset, yoffset, width, height, format, imageSize, ptr)`
 
-### Integer Uniforms (2/3/4 component)
-`uniform2i`, `uniform2iv`, `uniform3i`, `uniform3iv`, `uniform4i`, `uniform4iv`
+3. Declarations in `WebGLBridgeInternal.h` + entries in `kWebGLFunctions[]`
 
-### Vertex Attrib Constants
-`vertexAttrib1f`, `vertexAttrib1fv`, `vertexAttrib2f`, `vertexAttrib2fv`,
-`vertexAttrib3f`, `vertexAttrib3fv`, `vertexAttrib4f`, `vertexAttrib4fv`
+**Extension / format considerations:**
+
+The bridge functions themselves are straightforward typed-array-to-GL pass-throughs.
+The harder part is that compressed textures are only useful if the client knows which
+compressed formats are available. This requires:
+
+- Advertising the correct WebGL extension(s) in `GL_getSupportedExtensions` /
+  `GL_getExtension` (currently hardcoded). The relevant extensions are:
+  - `WEBGL_compressed_texture_s3tc` (DXT1/DXT3/DXT5 — widely supported on desktop
+    via ANGLE/D3D11)
+  - `WEBGL_compressed_texture_etc` (ETC2 — may not be available on D3D11)
+  - `WEBGL_compressed_texture_astc` (ASTC — typically mobile-only)
+- Querying ANGLE at context creation to see which compressed formats are actually
+  supported (`glGetIntegerv(GL_NUM_COMPRESSED_TEXTURE_FORMATS, ...)` and
+  `glGetIntegerv(GL_COMPRESSED_TEXTURE_FORMATS, ...)`), then dynamically building
+  the extension list instead of hardcoding it.
+- Returning the correct format constants from `getParameter(COMPRESSED_TEXTURE_FORMATS)`
+  in `GL_getParameter` (currently not handled — falls through to the `glGetIntegerv`
+  default which only reads a single int, not an array).
+
+**Minimal viable path:** If the goal is just S3TC (DXT) support on the D3D11 backend:
+1. Add the two `glCompressedTex*` pass-through functions (~20 lines each)
+2. Add `"WEBGL_compressed_texture_s3tc"` to the hardcoded extensions list
+3. Add a `GL_COMPRESSED_TEXTURE_FORMATS` case to `GL_getParameter` that queries the
+   full array from ANGLE and returns it as a JS array
+
+---
+
+## WebGL 2.0 (GLES3) Methods
+
+Infrastructure: ANGLE is configured for OpenGL ES 3.0 (`EGL_OPENGL_ES3_BIT`,
+`EGL_CONTEXT_CLIENT_VERSION 3`). All WebGL1 content continues to work unchanged.
+The JS shim detects `'webgl2'` context requests and applies WebGL2 constants.
+
+### Vertex Array Objects
+
+| Method | Status | Notes |
+|---|---|---|
+| `createVertexArray` | **Yes** | `glGenVertexArrays`. Returns `WebGLVertexArrayObject`. |
+| `deleteVertexArray` | **Yes** | `glDeleteVertexArrays`. |
+| `bindVertexArray` | **Yes** | `glBindVertexArray`. Null unbinds (0). |
+| `isVertexArray` | **Yes** | `glIsVertexArray`. |
+
+### Instanced Drawing
+
+| Method | Status | Notes |
+|---|---|---|
+| `drawArraysInstanced` | **Yes** | Full + flush + readback. |
+| `drawElementsInstanced` | **Yes** | Full + flush + readback. |
+| `drawRangeElements` | **Yes** | Full + flush + readback. |
+| `vertexAttribDivisor` | **Yes** | Full. |
+
+### Uniform Buffer Objects
+
+| Method | Status | Notes |
+|---|---|---|
+| `bindBufferBase` | **Yes** | Full. |
+| `bindBufferRange` | **Yes** | Full. |
+| `uniformBlockBinding` | **Yes** | Full. |
+| `getUniformBlockIndex` | **Yes** | Returns `GL_INVALID_INDEX` on failure. |
+| `getActiveUniformBlockName` | **Yes** | Full. |
+| `getActiveUniformBlockParameter` | **Yes** | Switches on pname for correct return type. |
+| `getUniformIndices` | **Yes** | JS string array → GLuint array. |
+| `getActiveUniforms` | **Yes** | Full. |
+
+### Framebuffer Enhancements
+
+| Method | Status | Notes |
+|---|---|---|
+| `drawBuffers` | **Yes** | JS array → `glDrawBuffers`. |
+| `readBuffer` | **Yes** | Full. |
+| `blitFramebuffer` | **Yes** | Full (10 args). |
+| `framebufferTextureLayer` | **Yes** | Full. |
+| `renderbufferStorageMultisample` | **Yes** | Full. |
+| `invalidateFramebuffer` | **Yes** | JS array → `glInvalidateFramebuffer`. |
+| `invalidateSubFramebuffer` | **Yes** | JS array + rect args. |
+
+### Transform Feedback
+
+| Method | Status | Notes |
+|---|---|---|
+| `createTransformFeedback` | **Yes** | `glGenTransformFeedbacks`. Returns `WebGLTransformFeedback`. |
+| `deleteTransformFeedback` | **Yes** | Full. |
+| `bindTransformFeedback` | **Yes** | Full. Null unbinds. |
+| `isTransformFeedback` | **Yes** | Full. |
+| `beginTransformFeedback` | **Yes** | Full. |
+| `endTransformFeedback` | **Yes** | Full. |
+| `pauseTransformFeedback` | **Yes** | Full. |
+| `resumeTransformFeedback` | **Yes** | Full. |
+| `transformFeedbackVaryings` | **Yes** | JS string array → `glTransformFeedbackVaryings`. |
+| `getTransformFeedbackVarying` | **Yes** | Returns WebGLActiveInfo-like object. |
+
+### Uint Uniforms
+
+| Method | Status | Notes |
+|---|---|---|
+| `uniform1ui` – `uniform4ui` | **Yes** | Full. |
+| `uniform1uiv` – `uniform4uiv` | **Yes** | TypedArray input only. |
+
+### Non-Square Matrix Uniforms
+
+| Method | Status | Notes |
+|---|---|---|
+| `uniformMatrix2x3fv`, `uniformMatrix3x2fv` | **Yes** | TypedArray input only. |
+| `uniformMatrix2x4fv`, `uniformMatrix4x2fv` | **Yes** | TypedArray input only. |
+| `uniformMatrix3x4fv`, `uniformMatrix4x3fv` | **Yes** | TypedArray input only. |
+
+### Integer Vertex Attribs
+
+| Method | Status | Notes |
+|---|---|---|
+| `vertexAttribIPointer` | **Yes** | Full. |
+| `vertexAttribI4i`, `vertexAttribI4ui` | **Yes** | Full. |
+| `vertexAttribI4iv`, `vertexAttribI4uiv` | **Yes** | TypedArray input. |
+
+### Clear Buffer
+
+| Method | Status | Notes |
+|---|---|---|
+| `clearBufferiv` | **Yes** | TypedArray input. |
+| `clearBufferuiv` | **Yes** | TypedArray input. |
+| `clearBufferfv` | **Yes** | TypedArray input. |
+| `clearBufferfi` | **Yes** | Full. |
+
+### 3D Textures & Storage
+
+| Method | Status | Notes |
+|---|---|---|
+| `texStorage2D` | **Yes** | Full. |
+| `texStorage3D` | **Yes** | Full. |
+| `texImage3D` | **Yes** | Null data supported. TypedArray input only. |
+| `texSubImage3D` | **Yes** | TypedArray input only. |
+| `copyTexSubImage3D` | **Yes** | Full. |
+
+### Samplers
+
+| Method | Status | Notes |
+|---|---|---|
+| `createSampler` | **Yes** | Returns `WebGLSampler`. |
+| `deleteSampler` | **Yes** | Full. |
+| `bindSampler` | **Yes** | Null unbinds. |
+| `isSampler` | **Yes** | Full. |
+| `samplerParameteri` | **Yes** | Full. |
+| `samplerParameterf` | **Yes** | Full. |
+| `getSamplerParameter` | **Yes** | Switches on pname for float vs int return. |
+
+### Queries
+
+| Method | Status | Notes |
+|---|---|---|
+| `createQuery` | **Yes** | Returns `WebGLQuery`. |
+| `deleteQuery` | **Yes** | Full. |
+| `isQuery` | **Yes** | Full. |
+| `beginQuery` | **Yes** | Full. |
+| `endQuery` | **Yes** | Full. |
+| `getQuery` | **Yes** | `CURRENT_QUERY` returns WebGLQuery object. |
+| `getQueryParameter` | **Yes** | `QUERY_RESULT_AVAILABLE` returns boolean. |
+
+### Sync Objects
+
+| Method | Status | Notes |
+|---|---|---|
+| `fenceSync` | **Yes** | Returns `WebGLSync`. GLsync stored as uintptr_t in `_id`. |
+| `isSync` | **Yes** | Full. |
+| `deleteSync` | **Yes** | Full. |
+| `clientWaitSync` | **Yes** | Returns GLenum status. |
+| `waitSync` | **Yes** | Full. |
+| `getSyncParameter` | **Yes** | Full. |
+
+### Buffer Operations
+
+| Method | Status | Notes |
+|---|---|---|
+| `copyBufferSubData` | **Yes** | Full. |
+| `getBufferSubData` | **Yes** | Emulated via `glMapBufferRange(GL_MAP_READ_BIT)` + memcpy. |
+
+### Misc Queries
+
+| Method | Status | Notes |
+|---|---|---|
+| `getFragDataLocation` | **Yes** | Full. |
+| `getIndexedParameter` | **Yes** | Buffer bindings return WebGLBuffer objects. |
+
+### WebGL2 Extensions
+
+| Extension | Status | Notes |
+|---|---|---|
+| `EXT_color_buffer_float` | **Yes** | Returned by `getExtension`. |
+| `EXT_color_buffer_half_float` | **Yes** | Returned by `getExtension`. |
+| `OES_texture_float_linear` | **Yes** | Returned by `getExtension`. |
+| `EXT_float_blend` | **Yes** | Returned by `getExtension`. |
+| `EXT_texture_filter_anisotropic` | **Yes** | Returned by `getExtension`. |
+
+---
+
+## WebGL 2.0 Known Limitations
+
+1. **GLsync pointer storage** — `fenceSync` stores the `GLsync` pointer as a
+   32-bit `GLuint` via `uintptr_t` truncation. Works on current 64-bit ANGLE
+   builds where sync handles fit in 32 bits, but may need widening if ANGLE
+   changes its handle format.
+
+2. **texImage3D / texSubImage3D** — TypedArray input only. No HTMLImageElement
+   or ImageData overloads.
+
+3. **getBufferSubData** — Emulated via `glMapBufferRange` since GLES3 lacks
+   `glGetBufferSubData`. Performance may be lower than native implementations.
+
+4. **getParameter** — New WebGL2 pnames fall through to the existing
+   `glGetIntegerv` default case, which works for most integer params but may
+   return wrong types for array or boolean params not explicitly handled.

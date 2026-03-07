@@ -25,4 +25,10 @@ namespace PrismaUI::WebGL {
     // renderer->Render() (which needs Ultralight's D3D11 state).
     void EndFrameGLState();
 
+    // Flush all dirty WebGL contexts: performs a single glReadPixels +
+    // UpdateSubresource readback for each context that had draw calls this
+    // frame.  Must be called on the Ultralight thread after renderer->Render()
+    // and before the render thread composites.
+    void FlushDirtyContexts();
+
 }  // namespace PrismaUI::WebGL

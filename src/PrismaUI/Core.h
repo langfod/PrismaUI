@@ -52,6 +52,10 @@ namespace PrismaUI::WASM {
     struct WASMInstanceHandle;
 }
 
+namespace PrismaUI::Audio {
+    struct AudioContext;
+}
+
 namespace PrismaUI::Listeners {
     class MyLoadListener;
     class MyViewListener;
@@ -85,6 +89,9 @@ namespace PrismaUI::Core {
 
         // WebGL support
         WebGL::ANGLEContext* webglContext = nullptr;  // Non-null if view has an active WebGL canvas
+
+        // Web Audio support
+        Audio::AudioContext* audioContext = nullptr;  // Non-null if view has an active AudioContext
 
         // WASM support
         // Tracks all live WASM instances for this view, cleaned up on view destroy.

@@ -61,4 +61,18 @@ namespace PrismaUI::SIMD {
     using FastMemcpyFunc = void (*)(void* dest, const void* src, size_t size);
     extern FastMemcpyFunc FastMemcpy;
 
+    /**
+     * Swizzle RGBA -> BGRA, force alpha to 255, and flip vertically.
+     * Used by the WebGL readback path to convert ANGLE's glReadPixels output
+     * into the format expected by the D3D11 shared texture.
+     *
+     * @param dest   Destination buffer (top-to-bottom row order, BGRA)
+     * @param src    Source buffer (bottom-to-top row order, RGBA)
+     * @param width  Image width in pixels
+     * @param height Image height in rows
+     */
+    using SwizzleFlipPixelsFunc = void (*)(void* dest, const void* src,
+                                            uint32_t width, uint32_t height);
+    extern SwizzleFlipPixelsFunc SwizzleFlipPixels;
+
 }  // namespace PrismaUI::SIMD

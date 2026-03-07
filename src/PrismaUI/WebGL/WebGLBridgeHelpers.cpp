@@ -2,6 +2,7 @@
 
 #include "ANGLEContext.h"
 #include "PrismaUI/Core.h"
+#include "Utils/SIMDDispatch.h"
 
 #include <d3d11.h>
 #include <spdlog/spdlog.h>
@@ -12,22 +13,53 @@ namespace PrismaUI::WebGL {
 
     // =========================================================================
     // Per-frame context activation.
-    // eglMakeCurrent must run at least once per frame to ensure ANGLE's
-    // context is current on the Ultralight thread.  Since ANGLE now has its
-    // own D3D11 device, we no longer need to save/restore Skyrim's D3D11
-    // render targets — the two devices are independent.
+    // eglMakeCurrent is called whenever the active context changes on this
+    // thread — once per canvas per frame in the typical single-canvas case,
+    // and on every cross-canvas switch in multi-canvas frames.
+    //
+    // g_currentContext tracks which ANGLEContext is currently bound.
+    // nullptr at frame start (cleared by ResetFrameState).  Comparing by
+    // pointer avoids redundant eglMakeCurrent calls on single-canvas frames
+    // while correctly switching when multiple canvases interleave GL calls.
+    //
+    // Since ANGLE has its own D3D11 device, we no longer need to save/restore
+    // Skyrim's D3D11 render targets — the two devices are independent.
     // =========================================================================
-    thread_local bool g_contextActivatedThisFrame = false;
+    thread_local ANGLEContext* g_currentContext = nullptr;
 
     void EnsureContextActive(ANGLEContext* c) {
-        if (!g_contextActivatedThisFrame) {
+        if (g_currentContext != c) {
+            // Acquire the ANGLE-side keyed mutex for this context if needed.
+            // Guard with angleMutexAcquired so we never double-acquire when
+            // switching back to a context that was already set up this frame.
+            // FlushDirtyContexts releases it (key 1) at end of frame.
+            if (c->useSharedTexturePath && c->angleMutex && !c->angleMutexAcquired) {
+                // 16ms timeout = one full frame at 60 FPS; the render thread
+                // typically releases within <1ms.
+                HRESULT hr = c->angleMutex->AcquireSync(0, 16);
+                if (SUCCEEDED(hr)) {
+                    c->angleMutexAcquired = true;
+                } else {
+                    c->angleMutexAcquired = false;
+                    static uint64_t lastLog = 0;
+                    static uint32_t droppedFrames = 0;
+                    ++droppedFrames;
+                    uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch()).count();
+                    if (now - lastLog > 5000) {
+                        logger::warn("[WebGL] ANGLE keyed mutex acquire failed: 0x{:X} ({} dropped frames total)",
+                                     static_cast<uint32_t>(hr), droppedFrames);
+                        lastLog = now;
+                    }
+                }
+            }
             eglMakeCurrent(c->eglDisplay, c->eglSurface, c->eglSurface, c->eglContext);
-            g_contextActivatedThisFrame = true;
+            g_currentContext = c;
         }
     }
 
     void ResetFrameState() {
-        g_contextActivatedThisFrame = false;
+        g_currentContext = nullptr;
     }
 
     void EndFrameGLState() {
@@ -69,8 +101,15 @@ namespace PrismaUI::WebGL {
         uint32_t w = c->canvasWidth;
         uint32_t h = c->canvasHeight;
 
-        std::vector<GLubyte> pixels(w * h * 4);
-        glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
+        // Ensure persistent buffers are large enough (safety check for edge cases)
+        size_t requiredBytes = static_cast<size_t>(w) * h * 4;
+        if (c->readbackPixels.size() < requiredBytes) {
+            c->readbackPixels.resize(requiredBytes);
+            c->readbackFlipped.resize(requiredBytes);
+        }
+
+        GLubyte* pixels = c->readbackPixels.data();
+        glReadPixels(0, 0, w, h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 
         // Log the first readback's contents to diagnose garbled output
         static bool loggedPixels = false;
@@ -82,12 +121,10 @@ namespace PrismaUI::WebGL {
             // Sample some pixels: top-left, center, and bottom-right
             auto px = [&](uint32_t x, uint32_t y) -> std::string {
                 uint32_t idx = (y * w + x) * 4;
-                if (idx + 3 < pixels.size())
+                if (idx + 3 < requiredBytes)
                     return fmt::format("({},{},{},{})", pixels[idx], pixels[idx+1], pixels[idx+2], pixels[idx+3]);
                 return "(OOB)";
             };
-            logger::info("[WebGL-DBG] Pixel samples: [0,0]={} [150,75]={} [299,149]={}",
-                px(0, 0), px(w/2, h/2), px(w-1, h-1));
 
             // Check current framebuffer binding
             GLint fbo = 0;
@@ -95,24 +132,11 @@ namespace PrismaUI::WebGL {
             logger::info("[WebGL-DBG] Current FBO at readback time: {}", fbo);
         }
 
-        // Swizzle RGBA -> BGRA and flip vertically.
+        // Swizzle RGBA -> BGRA, force alpha to 255, and flip vertically.
         // glReadPixels returns rows bottom-to-top (OpenGL convention) but
         // D3D11 textures are top-to-bottom, so we must flip during the copy.
-        // Force alpha to 255: the default WebGL framebuffer is opaque, but
-        // ANGLE can return non-255 alpha values depending on the pbuffer
-        // surface configuration and blend state at clear/draw time.
-        uint32_t rowBytes = w * 4;
-        std::vector<GLubyte> flipped(w * h * 4);
-        for (uint32_t row = 0; row < h; row++) {
-            GLubyte* src = pixels.data() + row * rowBytes;
-            GLubyte* dst = flipped.data() + (h - 1 - row) * rowBytes;
-            for (uint32_t i = 0; i < rowBytes; i += 4) {
-                dst[i + 0] = src[i + 2]; // B <- R
-                dst[i + 1] = src[i + 1]; // G
-                dst[i + 2] = src[i + 0]; // R <- B
-                dst[i + 3] = 255;        // Force opaque
-            }
-        }
+        GLubyte* flipped = c->readbackFlipped.data();
+        SIMD::SwizzleFlipPixels(flipped, pixels, w, h);
 
         ID3D11DeviceContext* d3dCtx = PrismaUI::Core::d3dContext;
         if (!d3dCtx) {
@@ -127,7 +151,8 @@ namespace PrismaUI::WebGL {
         }
 
         D3D11_BOX box = {0, 0, 0, w, h, 1};
-        d3dCtx->UpdateSubresource(c->sharedTexture.Get(), 0, &box, flipped.data(), rowBytes, 0);
+        uint32_t rowBytes = w * 4;
+        d3dCtx->UpdateSubresource(c->sharedTexture.Get(), 0, &box, flipped, rowBytes, 0);
 
         // One-time log to confirm readback is working
         static bool loggedOnce = false;
@@ -143,7 +168,7 @@ namespace PrismaUI::WebGL {
                 static_cast<int>(desc.Usage), desc.BindFlags);
 
             // Check a pixel in the flipped/swizzled buffer
-            if (flipped.size() >= 4) {
+            if (requiredBytes >= 4) {
                 logger::info("[WebGL-DBG] Flipped buffer[0..3] (BGRA): {},{},{},{}",
                     flipped[0], flipped[1], flipped[2], flipped[3]);
             }
@@ -160,12 +185,55 @@ namespace PrismaUI::WebGL {
         if (readbackCount == 30) {
             auto px = [&](uint32_t px, uint32_t py) -> std::string {
                 uint32_t idx = (py * w + px) * 4;
-                if (idx + 3 < pixels.size())
+                if (idx + 3 < requiredBytes)
                     return fmt::format("({},{},{},{})", pixels[idx], pixels[idx+1], pixels[idx+2], pixels[idx+3]);
                 return "(OOB)";
             };
             logger::info("[WebGL-DBG] Readback frame 30 pixels (RGBA): [0,0]={} [80,72]={} [150,75]={}",
                 px(0, 0), px(80, 72), px(w/2, h/2));
+        }
+    }
+
+    // =========================================================================
+    // Deferred end-of-frame flush.
+    // Called once per frame from Core.cpp after renderer->Render() and before
+    // the render thread composites.
+    //
+    // Shared texture path:  glFlush → release ANGLE keyed mutex (key 1)
+    //   so the render thread can acquire it for reading.
+    //
+    // CPU readback fallback: glFlush → glReadPixels → swizzle → UpdateSubresource.
+    // =========================================================================
+    void FlushDirtyContexts() {
+        for (ANGLEContext* c : GetActiveContexts()) {
+            if (!c || !c->initialized) continue;
+
+            // Reset per-frame flag — DrawViews checks this to know if
+            // keyed mutex synchronization is needed.
+            c->mutexReleasedThisFrame = false;
+
+            if (!c->frameDirty) continue;
+
+            EnsureContextActive(c);
+            glFlush();
+
+            if (c->useSharedTexturePath) {
+                // Release the ANGLE-side keyed mutex so Skyrim can read.
+                // Only release if we successfully acquired it this frame.
+                if (c->angleMutexAcquired && c->angleMutex) {
+                    HRESULT hr = c->angleMutex->ReleaseSync(1);
+                    if (FAILED(hr)) {
+                        logger::error("[WebGL] Failed to release ANGLE keyed mutex: 0x{:X}", static_cast<uint32_t>(hr));
+                    } else {
+                        c->mutexReleasedThisFrame = true;
+                    }
+                    c->angleMutexAcquired = false;
+                }
+            } else {
+                ReadbackToSharedTexture(c);
+            }
+
+            c->frameDirty = false;
         }
     }
 

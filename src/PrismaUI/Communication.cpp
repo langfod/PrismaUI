@@ -391,7 +391,7 @@ namespace PrismaUI::Communication {
         }
 
         if (targetCallback) {
-            logger::debug("InvokeCppCallback: Found callback. Invoking with data: '{}'", paramStr);
+            //logger::debug("InvokeCppCallback: Found callback. Invoking with data: '{}'", paramStr);
             try {
                 targetCallback(paramStr);
 

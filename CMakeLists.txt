@@ -1,8 +1,9 @@
-cmake_minimum_required(VERSION 3.21)
+cmake_minimum_required(VERSION 3.25)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+add_definitions(-D_WIN32_WINNT=0x0A00)
 
 # Limit build parallelism (configurable via -DCMAKE_COMPILE_JOBS and -DCMAKE_LINK_JOBS)
 if(NOT DEFINED CMAKE_COMPILE_JOBS)
@@ -18,7 +19,7 @@ set(CMAKE_JOB_POOL_COMPILE compile)
 set(CMAKE_JOB_POOL_LINK link)
 set(CMAKE_INSTALL_MESSAGE LAZY)
 
-project(PrismaUI VERSION 1.4.2 LANGUAGES CXX)
+project(PrismaUI VERSION 1.5.2 LANGUAGES CXX)
 
 # Set build root for external builds
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
@@ -93,7 +94,7 @@ message(STATUS "  AVX2: ${SIMD_AVX2_SOURCES}")
 target_include_directories(${PROJECT_NAME}
     PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/src"
-    "${ULTRALIGHT_INCLUDE_DIR}"
+"${ULTRALIGHT_INCLUDE_DIR}"
     "${ULTRALIGHT_SDK_ROOT}/shaders/generated/headers"
 )
 
@@ -126,6 +127,9 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
 
 # Link WAMR for WebAssembly support (interpreter mode, fetched via cmake/wamr.cmake)
 add_wamr_dependencies(${PROJECT_NAME})
+
+# Link miniaudio for audio decoding (compiled library, fetched via cmake/miniaudio.cmake)
+add_miniaudio_dependencies(${PROJECT_NAME})
 
 # Delay-load Ultralight DLLs so they can be loaded from custom path at runtime
 target_link_options(${PROJECT_NAME}
@@ -192,3 +196,6 @@ add_custom_command(TARGET ${PROJECT_NAME} POST_BUILD
     
     COMMAND "${CMAKE_COMMAND}" -E echo "Creating distribution folder: dist/PrismaUI_${PROJECT_VERSION}"
 )
+
+# ESP plugin serialization
+#include(Spriggit) # on hold

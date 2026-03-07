@@ -1,0 +1,14 @@
+{
+  "FormKey": "000800:PrismaUI.esp",
+  "EditorID": "AudioCategoryPrismaUI",
+  "Name": {
+    "TargetLanguage": "English",
+    "Value": "PrismUI"
+  },
+  "Flags": [
+    "ShouldAppearOnMenu"
+  ],
+  "Parent": "000E9E:Skyrim.esm",
+  "StaticVolumeMultiplier": 1.0,
+  "DefaultMenuVolume": 0.8
+}

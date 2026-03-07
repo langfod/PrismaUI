@@ -1,6 +1,7 @@
 ﻿#include "ViewManager.h"
 
 #include "Core.h"
+#include "Audio/AudioContext.h"
 #include "InputHandler.h"
 #include "Inspector.h"
 #include "Listeners.h"
@@ -477,6 +478,13 @@ namespace PrismaUI::ViewManager {
                         WASM::DestroyInstance(inst);
                     }
                     viewData->wasmInstances.reset();
+                }
+
+                // Clean up audio context
+                if (viewData->audioContext) {
+                    logger::debug("Destroy: Releasing AudioContext for View [{}]", viewId);
+                    Audio::DestroyAudioContext(viewData->audioContext);
+                    viewData->audioContext = nullptr;
                 }
 
                 // Clean up inspector resources first

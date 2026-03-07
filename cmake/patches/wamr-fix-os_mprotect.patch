@@ -1,0 +1,108 @@
+diff --git a/core/shared/platform/windows/win_memmap.c b/core/shared/platform/windows/win_memmap.c
+index 994c3e4..d1c0dae 100644
+--- a/core/shared/platform/windows/win_memmap.c
++++ b/core/shared/platform/windows/win_memmap.c
+@@ -60,6 +60,87 @@ os_mmap(void *hint, size_t size, int prot, int flags, os_file_handle file)
+         alloc_type |= MEM_COMMIT;
+     }
+ 
++    /* MAP_32BIT handling for AOT relocation compatibility on Windows x64.
++
++       Strategy 1 -- Low 2 GB: scan 0 - 2 GB for a free region.
++       AOT code compiled with LLVM's small code model contains
++       IMAGE_REL_AMD64_ADDR32 (absolute 32-bit) relocations whose target
++       virtual address must fit in 32 bits.  Placing ALL AOT sections in
++       the low 2 GB satisfies both ADDR32 and REL32 (intra-module) at once.
++       This strategy MUST be tried first because a near-anchor allocation
++       in high memory would satisfy REL32 but break ADDR32.
++
++       Strategy 2 -- Near-anchor: allocate within +/-2GB of our own code.
++       Fallback when the low 2 GB is exhausted (e.g. large game loaded).
++       WAMR is statically linked into the host module, so &os_mmap sits
++       inside that module.  This keeps AOT sections reachable by
++       IMAGE_REL_AMD64_REL32 (PC-relative 32-bit) relocations -- the kind
++       emitted by  wamrc --enable-indirect-mode  and for PLT stubs that
++       call back into the WAMR runtime.  ADDR32 relocations may still fail
++       in this case if the host module is above 2 GB; modules that only
++       use REL32 (--enable-indirect-mode) will work. */
++    if (flags & MMAP_MAP_32BIT) {
++        MEMORY_BASIC_INFORMATION mbi;
++        uintptr_t try_addr;
++
++        /* --- Strategy 1: low 2 GB (absolute 32-bit addresses) --- */
++        for (try_addr = page_size;
++             try_addr + request_size <= (uintptr_t)0x80000000; ) {
++            if (VirtualQuery((LPCVOID)try_addr, &mbi, sizeof(mbi))
++                    == sizeof(mbi)) {
++                if (mbi.State == MEM_FREE
++                        && mbi.RegionSize >= request_size) {
++                    addr = VirtualAlloc((LPVOID)try_addr, request_size,
++                                        alloc_type, protect);
++                    if (addr)
++                        return addr;
++                }
++                try_addr = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
++            }
++            else {
++                try_addr += page_size;
++            }
++        }
++
++        /* --- Strategy 2: within +/-2 GB of this module --- */
++        {
++            uintptr_t anchor = (uintptr_t)&os_mmap;
++            uintptr_t half   = (uintptr_t)0x7FFF0000; /* ~2 GB */
++            uintptr_t lo = (anchor > half) ? (anchor - half) : page_size;
++            uintptr_t hi = (anchor <= UINTPTR_MAX - half)
++                               ? (anchor + half) : UINTPTR_MAX;
++            lo = (lo + page_size - 1) & ~(page_size - 1);
++            if (lo < page_size)
++                lo = page_size;
++
++            for (try_addr = lo; try_addr + request_size <= hi; ) {
++                if (VirtualQuery((LPCVOID)try_addr, &mbi, sizeof(mbi))
++                        == sizeof(mbi)) {
++                    if (mbi.State == MEM_FREE
++                            && mbi.RegionSize >= request_size) {
++                        addr = VirtualAlloc((LPVOID)try_addr, request_size,
++                                            alloc_type, protect);
++                        if (addr) {
++#if TRACE_MEMMAP != 0
++                            printf("Map memory (near-anchor %p), "
++                                   "request_size: %zu, alloc_type: 0x%x, "
++                                   "protect: 0x%x, ret: %p\n",
++                                   (void *)anchor, request_size,
++                                   alloc_type, protect, addr);
++#endif
++                            return addr;
++                        }
++                    }
++                    try_addr = (uintptr_t)mbi.BaseAddress + mbi.RegionSize;
++                }
++                else {
++                    try_addr += page_size;
++                }
++            }
++        }
++        /* Both strategies failed -- fall through to normal VirtualAlloc */
++    }
++
+     addr = VirtualAlloc((LPVOID)hint, request_size, alloc_type, protect);
+ 
+ #if TRACE_MEMMAP != 0
+@@ -132,6 +213,7 @@ int
+ os_mprotect(void *addr, size_t size, int prot)
+ {
+     DWORD protect;
++    DWORD old_protect;
+     size_t page_size = os_getpagesize();
+     size_t request_size = (size + page_size - 1) & ~(page_size - 1);
+ 
+@@ -143,5 +225,6 @@ os_mprotect(void *addr, size_t size, int prot)
+     printf("Mprotect memory, addr: %p, request_size: %zu, protect: 0x%x\n",
+            addr, request_size, protect);
+ #endif
+-    return VirtualProtect((LPVOID)addr, request_size, protect, NULL);
++    return VirtualProtect((LPVOID)addr, request_size, protect, &old_protect)
++               ? 0 : -1;
+ }

@@ -1,6 +1,10 @@
 #include "ANGLEContext.h"
 
+#include <EGL/eglext_angle.h>
+#include <dxgi.h>
 #include <spdlog/spdlog.h>
+#include <algorithm>
+#include <vector>
 
 // ANGLE EGL extensions for D3D11 interop
 #ifndef EGL_ANGLE_platform_angle
@@ -15,6 +19,14 @@ namespace PrismaUI::WebGL {
     // Global ANGLE display (one per process)
     static EGLDisplay g_ANGLEDisplay = EGL_NO_DISPLAY;
     static bool g_ANGLEInitialized = false;
+
+    // Active ANGLE contexts tracked for deferred end-of-frame readback.
+    // All access is on the Ultralight thread — no synchronization needed.
+    static std::vector<ANGLEContext*> g_activeContexts;
+
+    std::span<ANGLEContext* const> GetActiveContexts() {
+        return g_activeContexts;
+    }
 
     // Function pointer types for ANGLE EGL extensions
     using PFNEGLGETPLATFORMDISPLAYEXTPROC = EGLDisplay(EGLAPIENTRY*)(EGLenum, void*, const EGLint*);
@@ -77,7 +89,9 @@ namespace PrismaUI::WebGL {
     }
 
     static bool CreateSharedTexture(ANGLEContext* ctx, uint32_t width, uint32_t height, ID3D11Device* device) {
-        // Create D3D11 texture that will be shared between ANGLE and the render thread
+        // Create a D3D11 texture on Skyrim's device for compositing.
+        // We try keyed-mutex sharing first (for the zero-copy DXGI path).
+        // If that fails, fall back to a plain texture for CPU readback.
         D3D11_TEXTURE2D_DESC texDesc = {};
         texDesc.Width = width;
         texDesc.Height = height;
@@ -87,17 +101,63 @@ namespace PrismaUI::WebGL {
         texDesc.SampleDesc.Count = 1;
         texDesc.SampleDesc.Quality = 0;
         texDesc.Usage = D3D11_USAGE_DEFAULT;
-        texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
         texDesc.CPUAccessFlags = 0;
-        texDesc.MiscFlags = 0;
 
         ctx->sharedTexture.Reset();
         ctx->sharedSRV.Reset();
+        ctx->skyrimMutex.Reset();
+        ctx->sharedHandle = nullptr;
+
+        // Log device info for diagnostics
+        D3D_FEATURE_LEVEL featureLevel = device->GetFeatureLevel();
+        logger::info("[WebGL] CreateSharedTexture: {}x{}, device feature level: 0x{:X}",
+                     width, height, static_cast<uint32_t>(featureLevel));
+
+        // Try keyed-mutex shared texture (needed for zero-copy DXGI path)
+        bool sharingReady = false;
+        texDesc.BindFlags = D3D11_BIND_RENDER_TARGET | D3D11_BIND_SHADER_RESOURCE;
+        texDesc.MiscFlags = D3D11_RESOURCE_MISC_SHARED_KEYEDMUTEX;
 
         HRESULT hr = device->CreateTexture2D(&texDesc, nullptr, ctx->sharedTexture.GetAddressOf());
-        if (FAILED(hr)) {
-            logger::error("[WebGL] Failed to create shared D3D11 texture: 0x{:X}", static_cast<uint32_t>(hr));
-            return false;
+        if (SUCCEEDED(hr)) {
+            // Get keyed mutex on Skyrim's side
+            hr = ctx->sharedTexture.As(&ctx->skyrimMutex);
+            if (SUCCEEDED(hr)) {
+                // Get DXGI shared handle for cross-device sharing
+                Microsoft::WRL::ComPtr<IDXGIResource> dxgiResource;
+                hr = ctx->sharedTexture.As(&dxgiResource);
+                if (SUCCEEDED(hr)) {
+                    hr = dxgiResource->GetSharedHandle(&ctx->sharedHandle);
+                    if (SUCCEEDED(hr) && ctx->sharedHandle) {
+                        sharingReady = true;
+                    }
+                }
+            }
+
+            if (!sharingReady) {
+                logger::warn("[WebGL] Keyed mutex texture created but sharing setup failed (0x{:X})",
+                             static_cast<uint32_t>(hr));
+                ctx->skyrimMutex.Reset();
+                ctx->sharedHandle = nullptr;
+                ctx->sharedTexture.Reset();
+            }
+        } else {
+            logger::warn("[WebGL] Keyed mutex texture failed (0x{:X})", static_cast<uint32_t>(hr));
+        }
+
+        // If keyed-mutex sharing failed, create a plain texture for CPU readback
+        if (!sharingReady) {
+            ctx->sharedTexture.Reset();
+            texDesc.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+            texDesc.MiscFlags = 0;
+
+            hr = device->CreateTexture2D(&texDesc, nullptr, ctx->sharedTexture.GetAddressOf());
+            if (FAILED(hr)) {
+                logger::error("[WebGL] Failed to create D3D11 texture: 0x{:X}", static_cast<uint32_t>(hr));
+                return false;
+            }
+            logger::info("[WebGL] Created plain D3D11 texture for CPU readback path");
         }
 
         D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc = {};
@@ -109,11 +169,107 @@ namespace PrismaUI::WebGL {
         hr = device->CreateShaderResourceView(ctx->sharedTexture.Get(), &srvDesc, ctx->sharedSRV.GetAddressOf());
         if (FAILED(hr)) {
             logger::error("[WebGL] Failed to create SRV for shared texture: 0x{:X}", static_cast<uint32_t>(hr));
+            ctx->skyrimMutex.Reset();
             ctx->sharedTexture.Reset();
+            ctx->sharedHandle = nullptr;
             return false;
         }
 
+        return sharingReady;
+    }
+
+    // Try to set up the zero-copy shared texture path:
+    // 1. Query ANGLE's internal D3D11 device
+    // 2. Open the shared texture on ANGLE's device
+    // 3. Create an EGL pbuffer surface backed by the shared texture
+    // Returns true if successful; on failure, caller should use CPU readback fallback.
+    static bool TrySetupSharedTexturePath(ANGLEContext* ctx) {
+        // Get EGL extension function pointers
+        auto eglQueryDisplayAttribEXT =
+            reinterpret_cast<PFNEGLQUERYDISPLAYATTRIBEXTPROC>(eglGetProcAddress("eglQueryDisplayAttribEXT"));
+        auto eglQueryDeviceAttribEXT =
+            reinterpret_cast<PFNEGLQUERYDEVICEATTRIBEXTPROC>(eglGetProcAddress("eglQueryDeviceAttribEXT"));
+
+        if (!eglQueryDisplayAttribEXT || !eglQueryDeviceAttribEXT) {
+            logger::warn("[WebGL] Shared texture: EGL device query extensions not available");
+            return false;
+        }
+
+        // Query ANGLE's internal D3D11 device
+        EGLDeviceEXT eglDevice = EGL_NO_DEVICE_EXT;
+        if (!eglQueryDisplayAttribEXT(ctx->eglDisplay, EGL_DEVICE_EXT, reinterpret_cast<EGLAttrib*>(&eglDevice)) ||
+            eglDevice == EGL_NO_DEVICE_EXT) {
+            logger::warn("[WebGL] Shared texture: failed to query EGL device (err=0x{:X})", eglGetError());
+            return false;
+        }
+
+        ID3D11Device* angleDevice = nullptr;
+        if (!eglQueryDeviceAttribEXT(eglDevice, EGL_D3D11_DEVICE_ANGLE, reinterpret_cast<EGLAttrib*>(&angleDevice)) ||
+            !angleDevice) {
+            logger::warn("[WebGL] Shared texture: failed to query ANGLE's D3D11 device (err=0x{:X})", eglGetError());
+            return false;
+        }
+
+        // Open the shared texture on ANGLE's device
+        ctx->angleSharedTexture.Reset();
+        ctx->angleMutex.Reset();
+
+        HRESULT hr = angleDevice->OpenSharedResource(
+            ctx->sharedHandle,
+            __uuidof(ID3D11Texture2D),
+            reinterpret_cast<void**>(ctx->angleSharedTexture.GetAddressOf()));
+        if (FAILED(hr)) {
+            logger::warn("[WebGL] Shared texture: OpenSharedResource failed: 0x{:X}", static_cast<uint32_t>(hr));
+            return false;
+        }
+
+        // Get keyed mutex on ANGLE's side
+        hr = ctx->angleSharedTexture.As(&ctx->angleMutex);
+        if (FAILED(hr)) {
+            logger::warn("[WebGL] Shared texture: failed to get ANGLE-side keyed mutex: 0x{:X}", static_cast<uint32_t>(hr));
+            ctx->angleSharedTexture.Reset();
+            return false;
+        }
+
+        // Create EGL pbuffer surface backed by the shared texture.
+        // ANGLE's EGL_ANGLE_d3d_texture_client_buffer extension allows creating
+        // a surface from an application-provided D3D11 texture.
+        const EGLint surfaceAttribs[] = {
+            EGL_WIDTH, static_cast<EGLint>(ctx->canvasWidth),
+            EGL_HEIGHT, static_cast<EGLint>(ctx->canvasHeight),
+            EGL_TEXTURE_FORMAT, EGL_TEXTURE_RGBA,
+            EGL_TEXTURE_TARGET, EGL_TEXTURE_2D,
+            EGL_NONE
+        };
+
+        ctx->eglSharedSurface = eglCreatePbufferFromClientBuffer(
+            ctx->eglDisplay,
+            EGL_D3D_TEXTURE_ANGLE,
+            ctx->angleSharedTexture.Get(),
+            ctx->eglConfig,
+            surfaceAttribs);
+
+        if (ctx->eglSharedSurface == EGL_NO_SURFACE) {
+            logger::warn("[WebGL] Shared texture: eglCreatePbufferFromClientBuffer failed: 0x{:X}", eglGetError());
+            ctx->angleMutex.Reset();
+            ctx->angleSharedTexture.Reset();
+            return false;
+        }
+
+        logger::info("[WebGL] Shared texture path established (zero-copy DXGI sharing)");
         return true;
+    }
+
+    // Tear down shared texture path resources (ANGLE side only).
+    // Called during resize and destroy.
+    static void TeardownSharedTexturePath(ANGLEContext* ctx) {
+        if (ctx->eglSharedSurface != EGL_NO_SURFACE) {
+            eglDestroySurface(ctx->eglDisplay, ctx->eglSharedSurface);
+            ctx->eglSharedSurface = EGL_NO_SURFACE;
+        }
+        ctx->angleMutex.Reset();
+        ctx->angleSharedTexture.Reset();
+        ctx->useSharedTexturePath = false;
     }
 
     ANGLEContext* CreateWebGLContext(uint32_t width, uint32_t height, ID3D11Device* device) {
@@ -153,17 +309,12 @@ namespace PrismaUI::WebGL {
         }
 
         // Create the shared D3D11 texture on Skyrim's device for compositing.
-        // ANGLE renders to its own internal surface (on its own D3D11 device),
-        // and we copy pixels via glReadPixels + UpdateSubresource each frame.
-        if (!CreateSharedTexture(ctx, width, height, device)) {
-            delete ctx;
-            return nullptr;
-        }
+        // If this fails, we'll fall through to the CPU readback path below.
+        bool sharedTextureReady = CreateSharedTexture(ctx, width, height, device);
 
         // Create a regular pbuffer surface on ANGLE's own D3D11 device.
-        // We cannot use eglCreatePbufferFromClientBuffer because ANGLE's
-        // device and Skyrim's device are separate — the shared texture lives
-        // on Skyrim's device.  ReadbackToSharedTexture handles the cross-device copy.
+        // This is used as the render target when the shared texture path
+        // is unavailable (CPU readback fallback).
         const EGLint surfaceAttribs[] = {
             EGL_WIDTH, static_cast<EGLint>(width),
             EGL_HEIGHT, static_cast<EGLint>(height),
@@ -175,7 +326,6 @@ namespace PrismaUI::WebGL {
             delete ctx;
             return nullptr;
         }
-        logger::info("[WebGL] Created pbuffer surface (ANGLE has its own D3D11 device)");
 
         // Create an OpenGL ES 3.0 context
         const EGLint contextAttribs[] = {
@@ -201,6 +351,28 @@ namespace PrismaUI::WebGL {
 
         ctx->initialized = true;
 
+        g_activeContexts.push_back(ctx);
+
+        // Try to set up the zero-copy shared texture path.
+        // If successful, ANGLE renders directly into the DXGI shared texture
+        // and we switch eglSurface to the shared surface.
+        if (sharedTextureReady && TrySetupSharedTexturePath(ctx)) {
+            ctx->useSharedTexturePath = true;
+            // Switch to the shared surface for rendering
+            EGLSurface oldSurface = ctx->eglSurface;
+            ctx->eglSurface = ctx->eglSharedSurface;
+            eglMakeCurrent(g_ANGLEDisplay, ctx->eglSurface, ctx->eglSurface, ctx->eglContext);
+            // Destroy the regular pbuffer — we no longer need it
+            eglDestroySurface(g_ANGLEDisplay, oldSurface);
+            logger::info("[WebGL] Using zero-copy DXGI shared texture path");
+        } else {
+            // Fallback: allocate readback buffers for CPU copy path
+            size_t bufSize = static_cast<size_t>(width) * height * 4;
+            ctx->readbackPixels.resize(bufSize);
+            ctx->readbackFlipped.resize(bufSize);
+            logger::info("[WebGL] Using CPU readback path (shared texture unavailable)");
+        }
+
         logger::info("[WebGL] Created WebGL context: {}x{}, GL_RENDERER={}", width, height,
                      reinterpret_cast<const char*>(glGetString(GL_RENDERER)));
         logger::info("[WebGL] GL_VERSION={}", reinterpret_cast<const char*>(glGetString(GL_VERSION)));
@@ -221,18 +393,20 @@ namespace PrismaUI::WebGL {
         // Unbind current context
         eglMakeCurrent(g_ANGLEDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 
-        // Destroy old surface
-        if (ctx->eglSurface != EGL_NO_SURFACE) {
+        // Tear down old shared texture path (if active)
+        bool wasShared = ctx->useSharedTexturePath;
+        TeardownSharedTexturePath(ctx);
+
+        // Destroy old surface (only if not the shared surface — already destroyed above)
+        if (!wasShared && ctx->eglSurface != EGL_NO_SURFACE) {
             eglDestroySurface(g_ANGLEDisplay, ctx->eglSurface);
-            ctx->eglSurface = EGL_NO_SURFACE;
         }
+        ctx->eglSurface = EGL_NO_SURFACE;
 
-        // Create new shared texture at new size
-        if (!CreateSharedTexture(ctx, width, height, device)) {
-            return false;
-        }
+        // Create new shared texture at new size (non-fatal if it fails)
+        bool sharedTextureReady = CreateSharedTexture(ctx, width, height, device);
 
-        // Create new pbuffer surface on ANGLE's own device
+        // Create new pbuffer surface on ANGLE's own device (fallback target)
         const EGLint surfaceAttribs[] = {
             EGL_WIDTH, static_cast<EGLint>(width),
             EGL_HEIGHT, static_cast<EGLint>(height),
@@ -244,16 +418,33 @@ namespace PrismaUI::WebGL {
             return false;
         }
 
-        // Rebind context
-        if (!eglMakeCurrent(g_ANGLEDisplay, ctx->eglSurface, ctx->eglSurface, ctx->eglContext)) {
-            logger::error("[WebGL] ResizeWebGLContext: eglMakeCurrent failed: 0x{:X}", eglGetError());
-            return false;
-        }
-
         ctx->canvasWidth = width;
         ctx->canvasHeight = height;
 
-        logger::info("[WebGL] Resized WebGL context to {}x{}", width, height);
+        // Try shared texture path again at new size
+        if (sharedTextureReady && TrySetupSharedTexturePath(ctx)) {
+            ctx->useSharedTexturePath = true;
+            EGLSurface oldSurface = ctx->eglSurface;
+            ctx->eglSurface = ctx->eglSharedSurface;
+            eglMakeCurrent(g_ANGLEDisplay, ctx->eglSurface, ctx->eglSurface, ctx->eglContext);
+            eglDestroySurface(g_ANGLEDisplay, oldSurface);
+            // Shrink readback buffers since they're not needed
+            ctx->readbackPixels.clear();
+            ctx->readbackPixels.shrink_to_fit();
+            ctx->readbackFlipped.clear();
+            ctx->readbackFlipped.shrink_to_fit();
+        } else {
+            // Rebind context with regular pbuffer
+            if (!eglMakeCurrent(g_ANGLEDisplay, ctx->eglSurface, ctx->eglSurface, ctx->eglContext)) {
+                logger::error("[WebGL] ResizeWebGLContext: eglMakeCurrent failed: 0x{:X}", eglGetError());
+                return false;
+            }
+            size_t bufSize = static_cast<size_t>(width) * height * 4;
+            ctx->readbackPixels.resize(bufSize);
+            ctx->readbackFlipped.resize(bufSize);
+        }
+
+        logger::info("[WebGL] Resized WebGL context to {}x{} (shared={})", width, height, ctx->useSharedTexturePath);
         return true;
     }
 
@@ -275,19 +466,35 @@ namespace PrismaUI::WebGL {
             return;
         }
 
+        g_activeContexts.erase(
+            std::remove(g_activeContexts.begin(), g_activeContexts.end(), ctx),
+            g_activeContexts.end());
+
         if (g_ANGLEDisplay != EGL_NO_DISPLAY) {
             eglMakeCurrent(g_ANGLEDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
 
             if (ctx->eglContext != EGL_NO_CONTEXT) {
                 eglDestroyContext(g_ANGLEDisplay, ctx->eglContext);
             }
-            if (ctx->eglSurface != EGL_NO_SURFACE) {
+
+            // If using shared path, eglSurface == eglSharedSurface — destroy once.
+            // If using fallback path, eglSurface is the regular pbuffer.
+            bool surfaceIsShared = (ctx->eglSurface == ctx->eglSharedSurface &&
+                                    ctx->eglSharedSurface != EGL_NO_SURFACE);
+
+            // Tear down shared texture path (destroys eglSharedSurface)
+            TeardownSharedTexturePath(ctx);
+
+            // Destroy the regular pbuffer only if it's separate from the shared surface
+            if (!surfaceIsShared && ctx->eglSurface != EGL_NO_SURFACE) {
                 eglDestroySurface(g_ANGLEDisplay, ctx->eglSurface);
             }
         }
 
+        ctx->skyrimMutex.Reset();
         ctx->sharedTexture.Reset();
         ctx->sharedSRV.Reset();
+        ctx->sharedHandle = nullptr;
         ctx->initialized = false;
 
         logger::info("[WebGL] Destroyed WebGL context");

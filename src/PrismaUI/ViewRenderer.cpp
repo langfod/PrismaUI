@@ -322,6 +322,23 @@ namespace PrismaUI::ViewRenderer {
             // Second pass: draw WebGL overlays with straight (non-premultiplied) alpha
             // blending. ANGLE/WebGL outputs straight alpha, which requires different
             // blend factors than Ultralight's premultiplied alpha output.
+
+            // Acquire keyed mutexes for shared-texture WebGL contexts that had
+            // new content this frame (mutexReleasedThisFrame set by FlushDirtyContexts).
+            // If no new draws happened, the texture content is stable and we can
+            // draw without mutex synchronization.
+            std::vector<WebGL::ANGLEContext*> acquiredMutexes;
+            for (const auto& viewData : viewsToDraw) {
+                if (!viewData || !viewData->webglContext) continue;
+                auto* wgl = viewData->webglContext;
+                if (wgl->useSharedTexturePath && wgl->mutexReleasedThisFrame && wgl->skyrimMutex) {
+                    HRESULT hr = wgl->skyrimMutex->AcquireSync(1, 5);
+                    if (SUCCEEDED(hr)) {
+                        acquiredMutexes.push_back(wgl);
+                    }
+                }
+            }
+
             spriteBatch->Begin(DirectX::SpriteSortMode_Deferred, commonStates->NonPremultiplied());
 
             for (const auto& viewData : viewsToDraw) {
@@ -329,6 +346,11 @@ namespace PrismaUI::ViewRenderer {
             }
 
             spriteBatch->End();
+
+            // Release all acquired keyed mutexes after End() has submitted GPU work
+            for (auto* wgl : acquiredMutexes) {
+                wgl->skyrimMutex->ReleaseSync(0);
+            }
 
             d3dContext->OMSetBlendState(backupBlendState, backupBlendFactor, backupSampleMask);
             d3dContext->OMSetDepthStencilState(backupDepthStencilState, backupStencilRef);
@@ -487,8 +509,16 @@ namespace PrismaUI::ViewRenderer {
 
         DirectX::SimpleMath::Vector2 scale(scaleX, scaleY);
 
+        // When using the shared texture path, ANGLE renders with OpenGL
+        // conventions (origin at bottom-left), so we flip vertically.
+        // Keyed mutex synchronization is handled by DrawViews around the
+        // entire SpriteBatch pass.
+        auto effects = webgl->useSharedTexturePath
+            ? DirectX::SpriteEffects_FlipVertically
+            : DirectX::SpriteEffects_None;
+
         spriteBatch->Draw(webgl->sharedSRV.Get(), webglPos, &webglSourceRect,
                           DirectX::Colors::White, 0.f, DirectX::SimpleMath::Vector2::Zero, scale,
-                          DirectX::SpriteEffects_None, 0.f);
+                          effects, 0.f);
     }
 }

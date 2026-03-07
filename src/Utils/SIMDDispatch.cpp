@@ -16,13 +16,16 @@ namespace PrismaUI::SIMD {
         void CopyPixels(void* dest, uint32_t destPitch, const void* src, uint32_t srcPitch, uint32_t width,
                         uint32_t height);
         void FastMemcpy(void* dest, const void* src, size_t size);
+        void SwizzleFlipPixels(void* dest, const void* src, uint32_t width, uint32_t height);
     }
 
     // SSE2 implementations (baseline x86_64, always available)
+    // SwizzleFlipPixels uses SSSE3 (_mm_shuffle_epi8) — selected only when SSSE3 is detected.
     namespace SSE2 {
         void CopyPixels(void* dest, uint32_t destPitch, const void* src, uint32_t srcPitch, uint32_t width,
                         uint32_t height);
         void FastMemcpy(void* dest, const void* src, size_t size);
+        void SwizzleFlipPixels(void* dest, const void* src, uint32_t width, uint32_t height);
     }
 
     // AVX implementations (compiled with /arch:AVX)
@@ -30,6 +33,7 @@ namespace PrismaUI::SIMD {
         void CopyPixels(void* dest, uint32_t destPitch, const void* src, uint32_t srcPitch, uint32_t width,
                         uint32_t height);
         void FastMemcpy(void* dest, const void* src, size_t size);
+        void SwizzleFlipPixels(void* dest, const void* src, uint32_t width, uint32_t height);
     }
 
     // AVX2 implementations (compiled with /arch:AVX2)
@@ -37,6 +41,7 @@ namespace PrismaUI::SIMD {
         void CopyPixels(void* dest, uint32_t destPitch, const void* src, uint32_t srcPitch, uint32_t width,
                         uint32_t height);
         void FastMemcpy(void* dest, const void* src, size_t size);
+        void SwizzleFlipPixels(void* dest, const void* src, uint32_t width, uint32_t height);
     }
 
     // ============================================================
@@ -45,6 +50,7 @@ namespace PrismaUI::SIMD {
 
     CopyPixelsFunc CopyPixels = Generic::CopyPixels;
     FastMemcpyFunc FastMemcpy = Generic::FastMemcpy;
+    SwizzleFlipPixelsFunc SwizzleFlipPixels = Generic::SwizzleFlipPixels;
 
     // ============================================================
     // Initialization
@@ -57,6 +63,7 @@ namespace PrismaUI::SIMD {
             g_ActiveInstructionSet = InstructionSet::None;
             CopyPixels = Generic::CopyPixels;
             FastMemcpy = Generic::FastMemcpy;
+            SwizzleFlipPixels = Generic::SwizzleFlipPixels;
             return;
         }
 
@@ -66,21 +73,29 @@ namespace PrismaUI::SIMD {
             g_ActiveInstructionSet = InstructionSet::AVX2;
             CopyPixels = AVX2::CopyPixels;
             FastMemcpy = AVX2::FastMemcpy;
+            SwizzleFlipPixels = AVX2::SwizzleFlipPixels;
             logger::info("SIMDDispatch: Using AVX2 implementations");
         } else if (cpuinfo_has_x86_avx()) {
             g_ActiveInstructionSet = InstructionSet::AVX;
             CopyPixels = AVX::CopyPixels;
             FastMemcpy = AVX::FastMemcpy;
+            // AVX implies SSSE3; use the SSSE3-based swizzle from SSE2 namespace
+            SwizzleFlipPixels = AVX::SwizzleFlipPixels;
             logger::info("SIMDDispatch: Using AVX implementations");
         } else if (cpuinfo_has_x86_sse2()) {
             g_ActiveInstructionSet = InstructionSet::SSE2;
             CopyPixels = SSE2::CopyPixels;
             FastMemcpy = SSE2::FastMemcpy;
+            // SwizzleFlipPixels uses SSSE3; only select if available
+            SwizzleFlipPixels = cpuinfo_has_x86_ssse3()
+                ? SSE2::SwizzleFlipPixels
+                : Generic::SwizzleFlipPixels;
             logger::info("SIMDDispatch: Using SSE2 implementations");
         } else {
             g_ActiveInstructionSet = InstructionSet::None;
             CopyPixels = Generic::CopyPixels;
             FastMemcpy = Generic::FastMemcpy;
+            SwizzleFlipPixels = Generic::SwizzleFlipPixels;
             logger::warn("SIMDDispatch: No SIMD support detected, using generic implementations");
         }
     }
@@ -147,6 +162,22 @@ namespace PrismaUI::SIMD {
             }
 #endif
             std::memcpy(dest, src, size);
+        }
+
+        void SwizzleFlipPixels(void* dest, const void* src, uint32_t width, uint32_t height) {
+            const uint32_t rowBytes = width * 4;
+            auto* srcBytes = static_cast<const uint8_t*>(src);
+            auto* dstBytes = static_cast<uint8_t*>(dest);
+            for (uint32_t row = 0; row < height; row++) {
+                const uint8_t* srcRow = srcBytes + row * rowBytes;
+                uint8_t* dstRow = dstBytes + (height - 1 - row) * rowBytes;
+                for (uint32_t i = 0; i < rowBytes; i += 4) {
+                    dstRow[i + 0] = srcRow[i + 2]; // B <- R
+                    dstRow[i + 1] = srcRow[i + 1]; // G
+                    dstRow[i + 2] = srcRow[i + 0]; // R <- B
+                    dstRow[i + 3] = 255;            // Force opaque
+                }
+            }
         }
     }  // namespace Generic
 

@@ -5,6 +5,7 @@
 include(commonlibsse)
 include(ultralight)
 include(wamr)
+include(miniaudio)
 
 # Helper function to add external directories to a target
 function(add_external_dependencies target_name)

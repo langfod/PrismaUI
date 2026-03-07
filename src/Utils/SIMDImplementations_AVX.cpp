@@ -48,4 +48,36 @@ namespace PrismaUI::SIMD::AVX {
         _mm256_zeroupper();
     }
 
+    // AVX-tier swizzle: uses SSSE3 128-bit shuffle (AVX implies SSSE3).
+    // _mm256_shuffle_epi8 requires AVX2, so we use 128-bit path here.
+    void SwizzleFlipPixels(void* dest, const void* src, uint32_t width, uint32_t height) {
+        const uint32_t rowBytes = width * 4;
+        auto* srcBytes = static_cast<const uint8_t*>(src);
+        auto* dstBytes = static_cast<uint8_t*>(dest);
+
+        const __m128i shuffleMask = _mm_setr_epi8(
+            2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15);
+        const __m128i alphaMask = _mm_set_epi8(
+            -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0);
+
+        for (uint32_t row = 0; row < height; row++) {
+            const uint8_t* srcRow = srcBytes + row * rowBytes;
+            uint8_t* dstRow = dstBytes + (height - 1 - row) * rowBytes;
+
+            uint32_t i = 0;
+            for (; i + 16 <= rowBytes; i += 16) {
+                __m128i px = _mm_loadu_si128(reinterpret_cast<const __m128i*>(srcRow + i));
+                px = _mm_shuffle_epi8(px, shuffleMask);
+                px = _mm_or_si128(px, alphaMask);
+                _mm_storeu_si128(reinterpret_cast<__m128i*>(dstRow + i), px);
+            }
+            for (; i < rowBytes; i += 4) {
+                dstRow[i + 0] = srcRow[i + 2];
+                dstRow[i + 1] = srcRow[i + 1];
+                dstRow[i + 2] = srcRow[i + 0];
+                dstRow[i + 3] = 255;
+            }
+        }
+    }
+
 }  // namespace PrismaUI::SIMD::AVX

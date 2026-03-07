@@ -543,7 +543,15 @@ namespace PrismaUI::WASM {
 
                 uint32_t maxSlots = (tfc->paramCount + tfc->resultCount) * 2;
                 if (maxSlots < 2) maxSlots = 2;
-                std::vector<uint32_t> wasmArgv(maxSlots, 0);
+
+                constexpr uint32_t kStackSlots = 32;
+                uint32_t stackBuf[kStackSlots] = {};
+                std::vector<uint32_t> heapBuf;
+                uint32_t* wasmArgv = stackBuf;
+                if (maxSlots > kStackSlots) {
+                    heapBuf.resize(maxSlots, 0);
+                    wasmArgv = heapBuf.data();
+                }
 
                 uint32_t slotIdx = 0;
                 for (uint32_t i = 0; i < tfc->paramCount && i < static_cast<uint32_t>(argc); i++) {
@@ -570,7 +578,7 @@ namespace PrismaUI::WASM {
                 }
 
                 if (!SEHCallWasm(tfc->execEnv, tfc->wasmFunc,
-                                 slotIdx, wasmArgv.data())) {
+                                 slotIdx, wasmArgv)) {
                     const char* exceptionMsg = wasm_runtime_get_exception(
                         wasm_runtime_get_module_inst(tfc->execEnv));
                     std::string errStr = exceptionMsg ? exceptionMsg : "WASM runtime error";
@@ -592,15 +600,15 @@ namespace PrismaUI::WASM {
 
                 if (resultType == WASM_F64) {
                     double result;
-                    memcpy(&result, wasmArgv.data(), sizeof(double));
+                    memcpy(&result, wasmArgv, sizeof(double));
                     return JSValueMakeNumber(ctx, result);
                 } else if (resultType == WASM_F32) {
                     float result;
-                    memcpy(&result, wasmArgv.data(), sizeof(float));
+                    memcpy(&result, wasmArgv, sizeof(float));
                     return JSValueMakeNumber(ctx, static_cast<double>(result));
                 } else if (resultType == WASM_I64) {
                     int64_t result;
-                    memcpy(&result, wasmArgv.data(), sizeof(int64_t));
+                    memcpy(&result, wasmArgv, sizeof(int64_t));
                     return JSValueMakeNumber(ctx, static_cast<double>(result));
                 } else {
                     return JSValueMakeNumber(ctx, static_cast<double>(

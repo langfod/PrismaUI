@@ -88,6 +88,7 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 1) return JSValueMakeUndefined(ctx);
         glClear(static_cast<GLbitfield>(JSValueToNumber(ctx, argv[0], nullptr)));
+        c->frameDirty = true;
         return JSValueMakeUndefined(ctx);
     }
 
@@ -358,6 +359,7 @@ namespace PrismaUI::WebGL {
             auto* ptr = static_cast<const GLint*>(GetTypedArrayDataPtr(ctx, arr));
             if (ptr) glClearBufferiv(buffer, drawbuffer, ptr);
         }
+        c->frameDirty = true;
         return JSValueMakeUndefined(ctx);
     }
 
@@ -372,6 +374,7 @@ namespace PrismaUI::WebGL {
             auto* ptr = static_cast<const GLuint*>(GetTypedArrayDataPtr(ctx, arr));
             if (ptr) glClearBufferuiv(buffer, drawbuffer, ptr);
         }
+        c->frameDirty = true;
         return JSValueMakeUndefined(ctx);
     }
 
@@ -386,6 +389,7 @@ namespace PrismaUI::WebGL {
             auto* ptr = static_cast<const GLfloat*>(GetTypedArrayDataPtr(ctx, arr));
             if (ptr) glClearBufferfv(buffer, drawbuffer, ptr);
         }
+        c->frameDirty = true;
         return JSValueMakeUndefined(ctx);
     }
 
@@ -398,6 +402,7 @@ namespace PrismaUI::WebGL {
             static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
             static_cast<GLfloat>(JSValueToNumber(ctx, argv[2], nullptr)),
             static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr)));
+        c->frameDirty = true;
         return JSValueMakeUndefined(ctx);
     }
 

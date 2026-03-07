@@ -59,4 +59,39 @@ namespace PrismaUI::SIMD::AVX2 {
         _mm256_zeroupper();
     }
 
+    void SwizzleFlipPixels(void* dest, const void* src, uint32_t width, uint32_t height) {
+        const uint32_t rowBytes = width * 4;
+        auto* srcBytes = static_cast<const uint8_t*>(src);
+        auto* dstBytes = static_cast<uint8_t*>(dest);
+
+        // AVX2 shuffle operates on two 128-bit lanes independently
+        const __m256i shuffleMask = _mm256_setr_epi8(
+            2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15,
+            2, 1, 0, 3, 6, 5, 4, 7, 10, 9, 8, 11, 14, 13, 12, 15);
+        const __m256i alphaMask = _mm256_set_epi8(
+            -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0,
+            -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0, -1, 0, 0, 0);
+
+        for (uint32_t row = 0; row < height; row++) {
+            const uint8_t* srcRow = srcBytes + row * rowBytes;
+            uint8_t* dstRow = dstBytes + (height - 1 - row) * rowBytes;
+
+            uint32_t i = 0;
+            for (; i + 32 <= rowBytes; i += 32) {
+                __m256i px = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(srcRow + i));
+                px = _mm256_shuffle_epi8(px, shuffleMask);
+                px = _mm256_or_si256(px, alphaMask);
+                _mm256_storeu_si256(reinterpret_cast<__m256i*>(dstRow + i), px);
+            }
+            for (; i < rowBytes; i += 4) {
+                dstRow[i + 0] = srcRow[i + 2];
+                dstRow[i + 1] = srcRow[i + 1];
+                dstRow[i + 2] = srcRow[i + 0];
+                dstRow[i + 3] = 255;
+            }
+        }
+
+        _mm256_zeroupper();
+    }
+
 }  // namespace PrismaUI::SIMD::AVX2

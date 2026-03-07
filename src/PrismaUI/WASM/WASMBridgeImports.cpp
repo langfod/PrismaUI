@@ -66,7 +66,14 @@ namespace PrismaUI::WASM {
         JSContextRef ctx = td->ctx;
 
         // Convert WASM args to JS values
-        std::vector<JSValueRef> jsArgs(td->paramCount);
+        constexpr uint32_t kStackArgs = 16;
+        JSValueRef stackArgs[kStackArgs];
+        std::vector<JSValueRef> heapArgs;
+        JSValueRef* jsArgs = stackArgs;
+        if (td->paramCount > kStackArgs) {
+            heapArgs.resize(td->paramCount);
+            jsArgs = heapArgs.data();
+        }
         uint64_t* argPtr = args;
 
         for (uint32_t i = 0; i < td->paramCount; i++) {
@@ -99,7 +106,7 @@ namespace PrismaUI::WASM {
         JSValueRef exc = nullptr;
         JSValueRef result = JSObjectCallAsFunction(
             ctx, td->jsFunc, nullptr,
-            td->paramCount, td->paramCount > 0 ? jsArgs.data() : nullptr,
+            td->paramCount, td->paramCount > 0 ? jsArgs : nullptr,
             &exc);
 
         if (exc) {

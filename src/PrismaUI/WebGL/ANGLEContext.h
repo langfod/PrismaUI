@@ -4,9 +4,12 @@
 #include <EGL/eglext.h>
 #include <GLES3/gl3.h>
 #include <d3d11.h>
+#include <dxgi.h>
 #include <wrl/client.h>
 
 #include <cstdint>
+#include <span>
+#include <vector>
 
 namespace PrismaUI::WebGL {
 
@@ -16,10 +19,22 @@ namespace PrismaUI::WebGL {
         EGLSurface eglSurface = EGL_NO_SURFACE;
         EGLConfig eglConfig = nullptr;
 
-        // Shared D3D11 texture on Skyrim's device: ReadbackToSharedTexture copies
-        // ANGLE's output here; the render thread composites from it via SpriteBatch.
+        // Shared D3D11 texture on Skyrim's device for compositing.
+        // When useSharedTexturePath is true, ANGLE renders directly into this
+        // texture via a DXGI shared handle (zero-copy).  Otherwise,
+        // ReadbackToSharedTexture copies pixels here via glReadPixels.
         Microsoft::WRL::ComPtr<ID3D11Texture2D> sharedTexture;
         Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> sharedSRV;
+
+        // DXGI shared texture path (zero-copy cross-device rendering)
+        bool useSharedTexturePath = false;
+        HANDLE sharedHandle = nullptr;
+        Microsoft::WRL::ComPtr<IDXGIKeyedMutex> skyrimMutex;   // Skyrim's side of the keyed mutex
+        Microsoft::WRL::ComPtr<IDXGIKeyedMutex> angleMutex;    // ANGLE's side of the keyed mutex
+        Microsoft::WRL::ComPtr<ID3D11Texture2D> angleSharedTexture;  // Shared texture opened on ANGLE's device
+        EGLSurface eglSharedSurface = EGL_NO_SURFACE;  // EGL pbuffer backed by shared texture
+        bool mutexReleasedThisFrame = false;  // Set by FlushDirtyContexts when ANGLE releases mutex
+        bool angleMutexAcquired = false;      // Whether ANGLE currently holds the keyed mutex
 
         uint32_t canvasWidth = 0;
         uint32_t canvasHeight = 0;
@@ -38,6 +53,13 @@ namespace PrismaUI::WebGL {
 
         // Last update tick from JS (ms since steady_clock epoch)
         uint64_t lastUpdateMs = 0;
+
+        // Set by draw calls; cleared after end-of-frame readback
+        bool frameDirty = false;
+
+        // Persistent readback buffers (reused across frames, resized on canvas resize)
+        std::vector<GLubyte> readbackPixels;
+        std::vector<GLubyte> readbackFlipped;
 
         bool initialized = false;
     };
@@ -64,5 +86,8 @@ namespace PrismaUI::WebGL {
 
     // Shut down the global ANGLE display.
     void ShutdownANGLE();
+
+    // Get all active ANGLE contexts (for deferred end-of-frame readback).
+    std::span<ANGLEContext* const> GetActiveContexts();
 
 }  // namespace PrismaUI::WebGL

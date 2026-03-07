@@ -448,6 +448,10 @@ namespace PrismaUI::Core {
                     localRenderer->Render();
                 }
 
+                // Perform a single deferred readback for each WebGL context
+                // that had draw calls this frame (instead of per-draw-call).
+                WebGL::FlushDirtyContexts();
+
                 RenderViews();
             } catch (const SEHException& seh) {
                 logger::critical("UI Thread: SEH Exception in render loop: {} at address 0x{:p}", seh.details(),

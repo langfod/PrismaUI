@@ -17,7 +17,12 @@ namespace PrismaUI::WebGL {
     // =========================================================================
     // Frame state
     // =========================================================================
-    extern thread_local bool g_contextActivatedThisFrame;
+    // Pointer to the context currently bound via eglMakeCurrent on this thread.
+    // nullptr at the start of each frame (cleared by ResetFrameState).
+    // Compared by pointer to detect context switches — avoids redundant
+    // eglMakeCurrent calls on single-canvas frames while correctly switching
+    // when multiple canvases issue GL calls in the same frame.
+    extern thread_local ANGLEContext* g_currentContext;
 
     // =========================================================================
     // Shared helpers

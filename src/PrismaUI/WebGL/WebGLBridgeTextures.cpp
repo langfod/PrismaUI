@@ -390,8 +390,7 @@ namespace PrismaUI::WebGL {
             static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
             static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
             static_cast<GLsizei>(JSValueToNumber(ctx, argv[2], nullptr)));
-        glFlush();
-        ReadbackToSharedTexture(c);
+        c->frameDirty = true;
         return JSValueMakeUndefined(ctx);
     }
 
@@ -406,8 +405,7 @@ namespace PrismaUI::WebGL {
         auto offset = static_cast<intptr_t>(JSValueToNumber(ctx, argv[3], nullptr));
 
         glDrawElements(mode, count, type, reinterpret_cast<const void*>(offset));
-        glFlush();
-        ReadbackToSharedTexture(c);
+        c->frameDirty = true;
 
         return JSValueMakeUndefined(ctx);
     }
@@ -425,8 +423,7 @@ namespace PrismaUI::WebGL {
             static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
             static_cast<GLsizei>(JSValueToNumber(ctx, argv[2], nullptr)),
             static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr)));
-        glFlush();
-        ReadbackToSharedTexture(c);
+        c->frameDirty = true;
         return JSValueMakeUndefined(ctx);
     }
 
@@ -442,8 +439,7 @@ namespace PrismaUI::WebGL {
         GLsizei instanceCount = static_cast<GLsizei>(JSValueToNumber(ctx, argv[4], nullptr));
 
         glDrawElementsInstanced(mode, count, type, reinterpret_cast<const void*>(offset), instanceCount);
-        glFlush();
-        ReadbackToSharedTexture(c);
+        c->frameDirty = true;
 
         return JSValueMakeUndefined(ctx);
     }
@@ -461,8 +457,7 @@ namespace PrismaUI::WebGL {
         auto offset = static_cast<intptr_t>(JSValueToNumber(ctx, argv[5], nullptr));
 
         glDrawRangeElements(mode, start, end, count, type, reinterpret_cast<const void*>(offset));
-        glFlush();
-        ReadbackToSharedTexture(c);
+        c->frameDirty = true;
 
         return JSValueMakeUndefined(ctx);
     }

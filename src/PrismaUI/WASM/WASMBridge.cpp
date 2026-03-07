@@ -39,7 +39,8 @@ namespace PrismaUI::WASM {
         logger::error("[WASM]   Address: {}", addr);
 
         if (code == EXCEPTION_ACCESS_VIOLATION && ep->ExceptionRecord->NumberParameters >= 2) {
-            const char* op = ep->ExceptionRecord->ExceptionInformation[0] == 0 ? "read" : "write";
+            ULONG_PTR accessType = ep->ExceptionRecord->ExceptionInformation[0];
+            const char* op = accessType == 0 ? "read" : accessType == 1 ? "write" : "execute (DEP)";
             void* target = reinterpret_cast<void*>(ep->ExceptionRecord->ExceptionInformation[1]);
             logger::error("[WASM]   Access violation: {} at address {}", op, target);
         }
@@ -288,7 +289,15 @@ namespace PrismaUI::WASM {
                 // Allocate generous space: 2 slots per param + 2 for result
                 uint32_t maxSlots = (efc->paramCount + efc->resultCount) * 2;
                 if (maxSlots < 2) maxSlots = 2;
-                std::vector<uint32_t> wasmArgv(maxSlots, 0);
+
+                constexpr uint32_t kStackSlots = 32;
+                uint32_t stackBuf[kStackSlots] = {};
+                std::vector<uint32_t> heapBuf;
+                uint32_t* wasmArgv = stackBuf;
+                if (maxSlots > kStackSlots) {
+                    heapBuf.resize(maxSlots, 0);
+                    wasmArgv = heapBuf.data();
+                }
 
                 // Convert JS args to WASM args based on type info
                 uint32_t slotIdx = 0;
@@ -317,7 +326,7 @@ namespace PrismaUI::WASM {
                 }
 
                 if (!SEHCallWasm(efc->execEnv, efc->wasmFunc,
-                                 slotIdx, wasmArgv.data())) {
+                                 slotIdx, wasmArgv)) {
                     // Guard: module_inst may be invalid after SEH exception
                     const char* exceptionMsg = nullptr;
                     wasm_module_inst_t mi = wasm_runtime_get_module_inst(efc->execEnv);
@@ -355,15 +364,15 @@ namespace PrismaUI::WASM {
 
                 if (resultType == WASM_F64) {
                     double result;
-                    memcpy(&result, wasmArgv.data(), sizeof(double));
+                    memcpy(&result, wasmArgv, sizeof(double));
                     return JSValueMakeNumber(ctx, result);
                 } else if (resultType == WASM_F32) {
                     float result;
-                    memcpy(&result, wasmArgv.data(), sizeof(float));
+                    memcpy(&result, wasmArgv, sizeof(float));
                     return JSValueMakeNumber(ctx, static_cast<double>(result));
                 } else if (resultType == WASM_I64) {
                     int64_t result;
-                    memcpy(&result, wasmArgv.data(), sizeof(int64_t));
+                    memcpy(&result, wasmArgv, sizeof(int64_t));
                     return JSValueMakeNumber(ctx, static_cast<double>(result));
                 } else {
                     // i32

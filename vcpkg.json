@@ -17,9 +17,5 @@
     {
       "name": "directxtex",
       "features": ["dx11"]
-    },
-    "directxmesh",
-    "stb",
-    "abseil"
-  ]
+    }  ]
 }

@@ -9,7 +9,6 @@
 namespace PrismaUI::Audio {
 
     const std::string& GetAudioShimJS() {
-        // [034] C++11 magic-static: thread-safe one-time initialization
         static std::string s = []() {
             auto shimPath = Utils::GetBasePath() / "misc" / "webaudio_shim.js";
             std::ifstream file(shimPath, std::ios::in | std::ios::binary);
@@ -17,8 +16,7 @@ namespace PrismaUI::Audio {
                 std::ostringstream ss;
                 ss << file.rdbuf();
                 std::string content = ss.str();
-                logger::info("[Audio] Loaded audio shim JS from: {} ({} bytes)",
-                             shimPath.string(), content.size());
+                logger::info("[Audio] Loaded audio shim JS from: {} ({} bytes)", shimPath.string(), content.size());
                 return content;
             } else {
                 logger::error("[Audio] Failed to load audio shim JS from: {}", shimPath.string());

@@ -9,11 +9,7 @@ namespace PrismaUI::Audio {
     struct AudioContext;
 
     struct AudioNode {
-        enum class Type {
-            Destination,
-            Gain,
-            BufferSource
-        };
+        enum class Type { Destination, Gain, BufferSource };
 
         Type type;
         AudioContext* context = nullptr;
@@ -35,8 +31,7 @@ namespace PrismaUI::Audio {
         // Read by JS thread to know when it's safe to reclaim heavy resources.
         std::atomic<bool> graphOrphaned{false};
 
-        virtual void Process(float* outL, float* outR, uint32_t numFrames,
-                             double contextTime, float sampleRate) = 0;
+        virtual void Process(float* outL, float* outR, uint32_t numFrames, double contextTime, float sampleRate) = 0;
         virtual ~AudioNode() = default;
     };
 

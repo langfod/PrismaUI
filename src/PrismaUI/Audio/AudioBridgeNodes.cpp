@@ -1,5 +1,8 @@
-#include "AudioBridge.h"
+#include <JavaScriptCore/JavaScript.h>
 
+#include <cstring>
+
+#include "AudioBridge.h"
 #include "AudioBuffer.h"
 #include "AudioCommandQueue.h"
 #include "AudioContext.h"
@@ -7,9 +10,6 @@
 #include "AudioNodes.h"
 #include "AudioParam.h"
 
-#include <JavaScriptCore/JavaScript.h>
-
-#include <cstring>
 
 namespace logger = SKSE::log;
 
@@ -27,8 +27,8 @@ namespace PrismaUI::Audio {
 
     // ---- Common node functions: connect / disconnect ----
 
-    static JSValueRef Audio_nodeConnect(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj,
-                                         size_t argc, const JSValueRef argv[], JSValueRef*) {
+    static JSValueRef Audio_nodeConnect(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj, size_t argc,
+                                        const JSValueRef argv[], JSValueRef*) {
         auto* source = GetNode(thisObj);
         if (!source || argc < 1) return JSValueMakeUndefined(ctx);
 
@@ -38,14 +38,13 @@ namespace PrismaUI::Audio {
         auto* dest = static_cast<AudioNode*>(JSObjectGetPrivate(destObj));
         if (!dest || !source->context) return JSValueMakeUndefined(ctx);
 
-        source->context->commandQueue_.TryPush(
-            {AudioCommand::Type::Connect, source, dest});
+        source->context->commandQueue_.TryPush({AudioCommand::Type::Connect, source, dest});
 
         return argv[0];  // Return the destination (per spec)
     }
 
-    static JSValueRef Audio_nodeDisconnect(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj,
-                                            size_t argc, const JSValueRef argv[], JSValueRef*) {
+    static JSValueRef Audio_nodeDisconnect(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj, size_t argc,
+                                           const JSValueRef argv[], JSValueRef*) {
         auto* node = GetNode(thisObj);
         if (!node || !node->context) return JSValueMakeUndefined(ctx);
 
@@ -53,12 +52,10 @@ namespace PrismaUI::Audio {
             JSObjectRef destObj = JSValueToObject(ctx, argv[0], nullptr);
             auto* dest = destObj ? static_cast<AudioNode*>(JSObjectGetPrivate(destObj)) : nullptr;
             if (dest) {
-                node->context->commandQueue_.TryPush(
-                    {AudioCommand::Type::Disconnect, node, dest});
+                node->context->commandQueue_.TryPush({AudioCommand::Type::Disconnect, node, dest});
             }
         } else {
-            node->context->commandQueue_.TryPush(
-                {AudioCommand::Type::DisconnectAll, node, nullptr});
+            node->context->commandQueue_.TryPush({AudioCommand::Type::DisconnectAll, node, nullptr});
         }
 
         return JSValueMakeUndefined(ctx);
@@ -66,31 +63,24 @@ namespace PrismaUI::Audio {
 
     // ---- GainNode ----
 
-    static JSValueRef Audio_getGainParam(JSContextRef ctx, JSObjectRef obj,
-                                          JSStringRef, JSValueRef*) {
+    static JSValueRef Audio_getGainParam(JSContextRef ctx, JSObjectRef obj, JSStringRef, JSValueRef*) {
         auto* node = static_cast<GainNode*>(JSObjectGetPrivate(obj));
         if (!node) return JSValueMakeNull(ctx);
         return JSObjectMake(ctx, GetAudioParamClass(), &node->gain);
     }
 
     static JSStaticFunction kGainNodeFunctions[] = {
-        {"connect",    Audio_nodeConnect,    kJSPropertyAttributeDontDelete},
+        {"connect", Audio_nodeConnect, kJSPropertyAttributeDontDelete},
         {"disconnect", Audio_nodeDisconnect, kJSPropertyAttributeDontDelete},
-        {nullptr, nullptr, 0}
-    };
+        {nullptr, nullptr, 0}};
 
     static JSStaticValue kGainNodeValues[] = {
         {"gain", Audio_getGainParam, nullptr, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
-        {nullptr, nullptr, nullptr, 0}
-    };
+        {nullptr, nullptr, nullptr, 0}};
 
-    // [001] Null private pointer on GC; nodes are owned by AudioContext::nodes.
-    static void AudioNodeFinalize(JSObjectRef obj) {
-        JSObjectSetPrivate(obj, nullptr);
-    }
+    static void AudioNodeFinalize(JSObjectRef obj) { JSObjectSetPrivate(obj, nullptr); }
 
     JSClassRef GetGainNodeClass() {
-        // [007] Use magic-static for thread-safe one-time init
         static JSClassRef cls = []() {
             JSClassDefinition classDef{};
             classDef.className = "GainNode";
@@ -105,13 +95,11 @@ namespace PrismaUI::Audio {
     // ---- AudioDestinationNode ----
 
     static JSStaticFunction kDestinationNodeFunctions[] = {
-        {"connect",    Audio_nodeConnect,    kJSPropertyAttributeDontDelete},
+        {"connect", Audio_nodeConnect, kJSPropertyAttributeDontDelete},
         {"disconnect", Audio_nodeDisconnect, kJSPropertyAttributeDontDelete},
-        {nullptr, nullptr, 0}
-    };
+        {nullptr, nullptr, 0}};
 
     JSClassRef GetAudioDestinationNodeClass() {
-        // [007] Magic-static; destination node is owned by AudioContext, not JS GC
         static JSClassRef cls = []() {
             JSClassDefinition classDef{};
             classDef.className = "AudioDestinationNode";
@@ -124,8 +112,8 @@ namespace PrismaUI::Audio {
 
     // ---- AudioBufferSourceNode ----
 
-    static JSValueRef Audio_bufferSourceStart(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj,
-                                               size_t argc, const JSValueRef argv[], JSValueRef*) {
+    static JSValueRef Audio_bufferSourceStart(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj, size_t argc,
+                                              const JSValueRef argv[], JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(thisObj));
         if (!node) return JSValueMakeUndefined(ctx);
 
@@ -139,8 +127,8 @@ namespace PrismaUI::Audio {
         return JSValueMakeUndefined(ctx);
     }
 
-    static JSValueRef Audio_bufferSourceStop(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj,
-                                              size_t argc, const JSValueRef argv[], JSValueRef*) {
+    static JSValueRef Audio_bufferSourceStop(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj, size_t argc,
+                                             const JSValueRef argv[], JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(thisObj));
         if (!node) return JSValueMakeUndefined(ctx);
 
@@ -152,8 +140,7 @@ namespace PrismaUI::Audio {
         return JSValueMakeUndefined(ctx);
     }
 
-    static JSValueRef Audio_getBuffer(JSContextRef ctx, JSObjectRef obj,
-                                       JSStringRef, JSValueRef*) {
+    static JSValueRef Audio_getBuffer(JSContextRef ctx, JSObjectRef obj, JSStringRef, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return JSValueMakeNull(ctx);
         AudioBuffer* buf = node->buffer.load(std::memory_order_relaxed);
@@ -161,8 +148,7 @@ namespace PrismaUI::Audio {
         return JSObjectMake(ctx, GetAudioBufferClass(), buf);
     }
 
-    static bool Audio_setBuffer(JSContextRef ctx, JSObjectRef obj,
-                                 JSStringRef, JSValueRef val, JSValueRef*) {
+    static bool Audio_setBuffer(JSContextRef ctx, JSObjectRef obj, JSStringRef, JSValueRef val, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return false;
 
@@ -179,85 +165,74 @@ namespace PrismaUI::Audio {
         return true;
     }
 
-    static JSValueRef Audio_getLoop(JSContextRef ctx, JSObjectRef obj,
-                                     JSStringRef, JSValueRef*) {
+    static JSValueRef Audio_getLoop(JSContextRef ctx, JSObjectRef obj, JSStringRef, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return JSValueMakeBoolean(ctx, false);
         return JSValueMakeBoolean(ctx, node->loop.load(std::memory_order_relaxed));
     }
 
-    static bool Audio_setLoop(JSContextRef ctx, JSObjectRef obj,
-                               JSStringRef, JSValueRef val, JSValueRef*) {
+    static bool Audio_setLoop(JSContextRef ctx, JSObjectRef obj, JSStringRef, JSValueRef val, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return false;
         node->loop.store(JSValueToBoolean(ctx, val), std::memory_order_relaxed);
         return true;
     }
 
-    static JSValueRef Audio_getLoopStart(JSContextRef ctx, JSObjectRef obj,
-                                          JSStringRef, JSValueRef*) {
+    static JSValueRef Audio_getLoopStart(JSContextRef ctx, JSObjectRef obj, JSStringRef, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return JSValueMakeNumber(ctx, 0);
         return JSValueMakeNumber(ctx, node->loopStart.load(std::memory_order_relaxed));
     }
 
-    static bool Audio_setLoopStart(JSContextRef ctx, JSObjectRef obj,
-                                    JSStringRef, JSValueRef val, JSValueRef*) {
+    static bool Audio_setLoopStart(JSContextRef ctx, JSObjectRef obj, JSStringRef, JSValueRef val, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return false;
         node->loopStart.store(JSValueToNumber(ctx, val, nullptr), std::memory_order_relaxed);
         return true;
     }
 
-    static JSValueRef Audio_getLoopEnd(JSContextRef ctx, JSObjectRef obj,
-                                        JSStringRef, JSValueRef*) {
+    static JSValueRef Audio_getLoopEnd(JSContextRef ctx, JSObjectRef obj, JSStringRef, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return JSValueMakeNumber(ctx, 0);
         return JSValueMakeNumber(ctx, node->loopEnd.load(std::memory_order_relaxed));
     }
 
-    static bool Audio_setLoopEnd(JSContextRef ctx, JSObjectRef obj,
-                                  JSStringRef, JSValueRef val, JSValueRef*) {
+    static bool Audio_setLoopEnd(JSContextRef ctx, JSObjectRef obj, JSStringRef, JSValueRef val, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return false;
         node->loopEnd.store(JSValueToNumber(ctx, val, nullptr), std::memory_order_relaxed);
         return true;
     }
 
-    static JSValueRef Audio_getPlaybackRate(JSContextRef ctx, JSObjectRef obj,
-                                             JSStringRef, JSValueRef*) {
+    static JSValueRef Audio_getPlaybackRate(JSContextRef ctx, JSObjectRef obj, JSStringRef, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return JSValueMakeNull(ctx);
         return JSObjectMake(ctx, GetAudioParamClass(), &node->playbackRate);
     }
 
-    static JSValueRef Audio_getEnded(JSContextRef ctx, JSObjectRef obj,
-                                      JSStringRef, JSValueRef*) {
+    static JSValueRef Audio_getEnded(JSContextRef ctx, JSObjectRef obj, JSStringRef, JSValueRef*) {
         auto* node = static_cast<AudioBufferSourceNode*>(JSObjectGetPrivate(obj));
         if (!node) return JSValueMakeBoolean(ctx, false);
         return JSValueMakeBoolean(ctx, node->ended.load(std::memory_order_acquire));
     }
 
     static JSStaticFunction kBufferSourceFunctions[] = {
-        {"connect",    Audio_nodeConnect,          kJSPropertyAttributeDontDelete},
-        {"disconnect", Audio_nodeDisconnect,       kJSPropertyAttributeDontDelete},
-        {"start",      Audio_bufferSourceStart,    kJSPropertyAttributeDontDelete},
-        {"stop",       Audio_bufferSourceStop,     kJSPropertyAttributeDontDelete},
-        {nullptr, nullptr, 0}
-    };
+        {"connect", Audio_nodeConnect, kJSPropertyAttributeDontDelete},
+        {"disconnect", Audio_nodeDisconnect, kJSPropertyAttributeDontDelete},
+        {"start", Audio_bufferSourceStart, kJSPropertyAttributeDontDelete},
+        {"stop", Audio_bufferSourceStop, kJSPropertyAttributeDontDelete},
+        {nullptr, nullptr, 0}};
 
     static JSStaticValue kBufferSourceValues[] = {
-        {"buffer",       Audio_getBuffer,       Audio_setBuffer, kJSPropertyAttributeDontDelete},
-        {"loop",         Audio_getLoop,         Audio_setLoop,   kJSPropertyAttributeDontDelete},
-        {"loopStart",    Audio_getLoopStart,    Audio_setLoopStart, kJSPropertyAttributeDontDelete},
-        {"loopEnd",      Audio_getLoopEnd,      Audio_setLoopEnd,   kJSPropertyAttributeDontDelete},
+        {"buffer", Audio_getBuffer, Audio_setBuffer, kJSPropertyAttributeDontDelete},
+        {"loop", Audio_getLoop, Audio_setLoop, kJSPropertyAttributeDontDelete},
+        {"loopStart", Audio_getLoopStart, Audio_setLoopStart, kJSPropertyAttributeDontDelete},
+        {"loopEnd", Audio_getLoopEnd, Audio_setLoopEnd, kJSPropertyAttributeDontDelete},
         {"playbackRate", Audio_getPlaybackRate, nullptr, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
-        {"ended",        Audio_getEnded,        nullptr, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
-        {nullptr, nullptr, nullptr, 0}
-    };
+        {"ended", Audio_getEnded, nullptr, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
+        {nullptr, nullptr, nullptr, 0}};
 
     JSClassRef GetBufferSourceNodeClass() {
-        // [007] Magic-static
         static JSClassRef cls = []() {
             JSClassDefinition classDef{};
             classDef.className = "AudioBufferSourceNode";
@@ -271,17 +246,14 @@ namespace PrismaUI::Audio {
 
     // ---- AudioBuffer ----
 
-    static JSValueRef Audio_getChannelData(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj,
-                                            size_t argc, const JSValueRef argv[], JSValueRef*) {
+    static JSValueRef Audio_getChannelData(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj, size_t argc,
+                                           const JSValueRef argv[], JSValueRef*) {
         auto* buf = GetBuffer(thisObj);
         if (!buf || argc < 1) return JSValueMakeNull(ctx);
 
         uint32_t ch = static_cast<uint32_t>(JSValueToNumber(ctx, argv[0], nullptr));
         if (ch >= buf->numberOfChannels) return JSValueMakeNull(ctx);
 
-        // [005] Copy channel data into a heap-allocated buffer so the JS Float32Array has
-        // independent lifetime from the AudioBuffer. The deallocator frees it when JS GC
-        // collects the ArrayBuffer, preventing use-after-free if the AudioBuffer is freed first.
         size_t numFloats = buf->channelData[ch].size();
         size_t byteLen = numFloats * sizeof(float);
 
@@ -289,23 +261,21 @@ namespace PrismaUI::Audio {
         std::memcpy(copy, buf->channelData[ch].data(), byteLen);
 
         JSObjectRef arrayBuffer = JSObjectMakeArrayBufferWithBytesNoCopy(
-            ctx, copy, byteLen,
-            [](void* bytes, void*) { delete[] static_cast<float*>(bytes); },
-            nullptr, nullptr);
+            ctx, copy, byteLen, [](void* bytes, void*) { delete[] static_cast<float*>(bytes); }, nullptr, nullptr);
 
         if (!arrayBuffer) {
             delete[] copy;
             return JSValueMakeNull(ctx);
         }
 
-        JSObjectRef float32Array = JSObjectMakeTypedArrayWithArrayBufferAndOffset(
-            ctx, kJSTypedArrayTypeFloat32Array, arrayBuffer, 0, numFloats, nullptr);
+        JSObjectRef float32Array = JSObjectMakeTypedArrayWithArrayBufferAndOffset(ctx, kJSTypedArrayTypeFloat32Array,
+                                                                                  arrayBuffer, 0, numFloats, nullptr);
 
         return float32Array ? float32Array : JSValueMakeNull(ctx);
     }
 
-    static JSValueRef Audio_copyFromChannel(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj,
-                                             size_t argc, const JSValueRef argv[], JSValueRef*) {
+    static JSValueRef Audio_copyFromChannel(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj, size_t argc,
+                                            const JSValueRef argv[], JSValueRef*) {
         auto* buf = GetBuffer(thisObj);
         if (!buf || argc < 2) return JSValueMakeUndefined(ctx);
 
@@ -335,8 +305,8 @@ namespace PrismaUI::Audio {
         return JSValueMakeUndefined(ctx);
     }
 
-    static JSValueRef Audio_copyToChannel(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj,
-                                           size_t argc, const JSValueRef argv[], JSValueRef*) {
+    static JSValueRef Audio_copyToChannel(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj, size_t argc,
+                                          const JSValueRef argv[], JSValueRef*) {
         auto* buf = GetBuffer(thisObj);
         if (!buf || argc < 2) return JSValueMakeUndefined(ctx);
 
@@ -366,53 +336,46 @@ namespace PrismaUI::Audio {
         return JSValueMakeUndefined(ctx);
     }
 
-    static JSValueRef Audio_bufNumChannels(JSContextRef ctx, JSObjectRef obj,
-                                            JSStringRef, JSValueRef*) {
+    static JSValueRef Audio_bufNumChannels(JSContextRef ctx, JSObjectRef obj, JSStringRef, JSValueRef*) {
         auto* buf = GetBuffer(obj);
         return JSValueMakeNumber(ctx, buf ? buf->numberOfChannels : 0);
     }
 
-    static JSValueRef Audio_bufLength(JSContextRef ctx, JSObjectRef obj,
-                                       JSStringRef, JSValueRef*) {
+    static JSValueRef Audio_bufLength(JSContextRef ctx, JSObjectRef obj, JSStringRef, JSValueRef*) {
         auto* buf = GetBuffer(obj);
         return JSValueMakeNumber(ctx, buf ? buf->length : 0);
     }
 
-    static JSValueRef Audio_bufSampleRate(JSContextRef ctx, JSObjectRef obj,
-                                           JSStringRef, JSValueRef*) {
+    static JSValueRef Audio_bufSampleRate(JSContextRef ctx, JSObjectRef obj, JSStringRef, JSValueRef*) {
         auto* buf = GetBuffer(obj);
         return JSValueMakeNumber(ctx, buf ? buf->sampleRate : 0);
     }
 
-    static JSValueRef Audio_bufDuration(JSContextRef ctx, JSObjectRef obj,
-                                         JSStringRef, JSValueRef*) {
+    static JSValueRef Audio_bufDuration(JSContextRef ctx, JSObjectRef obj, JSStringRef, JSValueRef*) {
         auto* buf = GetBuffer(obj);
         return JSValueMakeNumber(ctx, buf ? buf->duration : 0);
     }
 
     static void AudioBufferFinalize(JSObjectRef obj) {
         // Buffer lifetime is owned by AudioContext::buffers, not by JS GC.
-        // Just clear the private pointer to prevent stale access.
         JSObjectSetPrivate(obj, nullptr);
     }
 
     static JSStaticFunction kAudioBufferFunctions[] = {
-        {"getChannelData",  Audio_getChannelData,  kJSPropertyAttributeDontDelete},
+        {"getChannelData", Audio_getChannelData, kJSPropertyAttributeDontDelete},
         {"copyFromChannel", Audio_copyFromChannel, kJSPropertyAttributeDontDelete},
-        {"copyToChannel",   Audio_copyToChannel,   kJSPropertyAttributeDontDelete},
-        {nullptr, nullptr, 0}
-    };
+        {"copyToChannel", Audio_copyToChannel, kJSPropertyAttributeDontDelete},
+        {nullptr, nullptr, 0}};
 
     static JSStaticValue kAudioBufferValues[] = {
-        {"numberOfChannels", Audio_bufNumChannels, nullptr, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
-        {"length",           Audio_bufLength,      nullptr, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
-        {"sampleRate",       Audio_bufSampleRate,  nullptr, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
-        {"duration",         Audio_bufDuration,    nullptr, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
-        {nullptr, nullptr, nullptr, 0}
-    };
+        {"numberOfChannels", Audio_bufNumChannels, nullptr,
+         kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
+        {"length", Audio_bufLength, nullptr, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
+        {"sampleRate", Audio_bufSampleRate, nullptr, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
+        {"duration", Audio_bufDuration, nullptr, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
+        {nullptr, nullptr, nullptr, 0}};
 
     JSClassRef GetAudioBufferClass() {
-        // [007] Magic-static
         static JSClassRef cls = []() {
             JSClassDefinition classDef{};
             classDef.className = "AudioBuffer";
@@ -428,8 +391,8 @@ namespace PrismaUI::Audio {
 
     static constexpr uint32_t kCollectThreshold = 32;
 
-    JSValueRef Audio_createGain(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj,
-                                size_t, const JSValueRef[], JSValueRef*) {
+    JSValueRef Audio_createGain(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj, size_t, const JSValueRef[],
+                                JSValueRef*) {
         auto* ac = static_cast<AudioContext*>(JSObjectGetPrivate(thisObj));
         if (!ac) return JSValueMakeNull(ctx);
 
@@ -443,13 +406,12 @@ namespace PrismaUI::Audio {
         return JSObjectMake(ctx, GetGainNodeClass(), raw);
     }
 
-    JSValueRef Audio_createBufferSource(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj,
-                                         size_t, const JSValueRef[], JSValueRef*) {
+    JSValueRef Audio_createBufferSource(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj, size_t, const JSValueRef[],
+                                        JSValueRef*) {
         auto* ac = static_cast<AudioContext*>(JSObjectGetPrivate(thisObj));
         if (!ac) return JSValueMakeNull(ctx);
 
-        if (ac->orphanedNodeCount.load(std::memory_order_relaxed) >= kCollectThreshold)
-            CollectDeadNodes(ac);
+        if (ac->orphanedNodeCount.load(std::memory_order_relaxed) >= kCollectThreshold) CollectDeadNodes(ac);
 
         auto node = std::make_unique<AudioBufferSourceNode>();
         node->context = ac;
@@ -461,29 +423,28 @@ namespace PrismaUI::Audio {
         return JSObjectMake(ctx, GetBufferSourceNodeClass(), raw);
     }
 
-    JSValueRef Audio_createBuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj,
-                                   size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef Audio_createBuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj, size_t argc,
+                                  const JSValueRef argv[], JSValueRef*) {
         auto* ac = static_cast<AudioContext*>(JSObjectGetPrivate(thisObj));
         if (!ac || argc < 3) return JSValueMakeNull(ctx);
 
-        if (ac->orphanedNodeCount.load(std::memory_order_relaxed) >= kCollectThreshold)
-            CollectDeadNodes(ac);
+        if (ac->orphanedNodeCount.load(std::memory_order_relaxed) >= kCollectThreshold) CollectDeadNodes(ac);
 
         uint32_t numChannels = static_cast<uint32_t>(JSValueToNumber(ctx, argv[0], nullptr));
         uint32_t length = static_cast<uint32_t>(JSValueToNumber(ctx, argv[1], nullptr));
         float sampleRate = static_cast<float>(JSValueToNumber(ctx, argv[2], nullptr));
 
-        AudioBuffer* buf = CreateBuffer(numChannels, length, sampleRate);
+        auto buf = CreateBuffer(numChannels, length, sampleRate);
         if (!buf) return JSValueMakeNull(ctx);
 
-        AudioBuffer* raw = buf;
-        ac->buffers.emplace_back(buf);
+        AudioBuffer* raw = buf.get();
+        ac->buffers.push_back(std::move(buf));
 
         return JSObjectMake(ctx, GetAudioBufferClass(), raw);
     }
 
-    JSValueRef Audio_decodeAudioData(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj,
-                                      size_t argc, const JSValueRef argv[], JSValueRef* exception) {
+    JSValueRef Audio_decodeAudioData(JSContextRef ctx, JSObjectRef, JSObjectRef thisObj, size_t argc,
+                                     const JSValueRef argv[], JSValueRef* exception) {
         auto* ac = static_cast<AudioContext*>(JSObjectGetPrivate(thisObj));
         if (!ac || argc < 1) {
             if (exception) {
@@ -516,8 +477,7 @@ namespace PrismaUI::Audio {
             return JSValueMakeNull(ctx);
         }
 
-        AudioBuffer* buf = DecodeFromMemory(
-            static_cast<const uint8_t*>(bytes), byteLen, ac->sampleRate);
+        auto buf = DecodeFromMemory(static_cast<const uint8_t*>(bytes), byteLen, ac->sampleRate);
 
         if (!buf) {
             if (exception) {
@@ -528,8 +488,8 @@ namespace PrismaUI::Audio {
             return JSValueMakeNull(ctx);
         }
 
-        AudioBuffer* raw = buf;
-        ac->buffers.emplace_back(buf);
+        AudioBuffer* raw = buf.get();
+        ac->buffers.push_back(std::move(buf));
 
         return JSObjectMake(ctx, GetAudioBufferClass(), raw);
     }

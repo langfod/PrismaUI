@@ -1,17 +1,17 @@
 #include "AudioNodes.h"
-#include "AudioBuffer.h"
-#include "AudioContext.h"
 
 #include <algorithm>
 #include <cstring>
 
+#include "AudioBuffer.h"
+#include "AudioContext.h"
+
 namespace PrismaUI::Audio {
 
     // ---- AudioDestinationNode ----
-    void AudioDestinationNode::Process(float* outL, float* outR, uint32_t numFrames,
-                                        double contextTime, float sampleRate) {
+    void AudioDestinationNode::Process(float* outL, float* outR, uint32_t numFrames, double contextTime,
+                                       float sampleRate) {
         if (lastRenderFrame == context->renderFrame) {
-            // Already rendered this frame — return cached scratch
             std::memcpy(outL, scratchL.data(), numFrames * sizeof(float));
             std::memcpy(outR, scratchR.data(), numFrames * sizeof(float));
             return;
@@ -22,7 +22,6 @@ namespace PrismaUI::Audio {
         std::memset(outR, 0, numFrames * sizeof(float));
 
         if (inputs.empty()) {
-            // [026] Update scratch so a subsequent cached-path read sees silence, not stale data
             if (scratchL.size() < numFrames) {
                 scratchL.resize(numFrames);
                 scratchR.resize(numFrames);
@@ -56,8 +55,7 @@ namespace PrismaUI::Audio {
     }
 
     // ---- GainNode ----
-    void GainNode::Process(float* outL, float* outR, uint32_t numFrames,
-                           double contextTime, float sampleRate) {
+    void GainNode::Process(float* outL, float* outR, uint32_t numFrames, double contextTime, float sampleRate) {
         if (lastRenderFrame == context->renderFrame) {
             std::memcpy(outL, scratchL.data(), numFrames * sizeof(float));
             std::memcpy(outR, scratchR.data(), numFrames * sizeof(float));
@@ -124,12 +122,10 @@ namespace PrismaUI::Audio {
         started.store(true, std::memory_order_release);  // Publish all preceding writes
     }
 
-    void AudioBufferSourceNode::Stop(double when) {
-        stopTime.store(when, std::memory_order_relaxed);
-    }
+    void AudioBufferSourceNode::Stop(double when) { stopTime.store(when, std::memory_order_relaxed); }
 
-    void AudioBufferSourceNode::Process(float* outL, float* outR, uint32_t numFrames,
-                                         double contextTime, float sampleRate) {
+    void AudioBufferSourceNode::Process(float* outL, float* outR, uint32_t numFrames, double contextTime,
+                                        float sampleRate) {
         if (lastRenderFrame == context->renderFrame) {
             std::memcpy(outL, scratchL.data(), numFrames * sizeof(float));
             std::memcpy(outR, scratchR.data(), numFrames * sizeof(float));
@@ -145,7 +141,8 @@ namespace PrismaUI::Audio {
         AudioBuffer* buf = buffer.load(std::memory_order_acquire);
 
         // Not started, ended, or no buffer => silence
-        if (!started.load(std::memory_order_acquire) || ended.load(std::memory_order_relaxed) || !buf || buf->length == 0) {
+        if (!started.load(std::memory_order_acquire) || ended.load(std::memory_order_relaxed) || !buf ||
+            buf->length == 0) {
             std::memset(outL, 0, numFrames * sizeof(float));
             std::memset(outR, 0, numFrames * sizeof(float));
             std::memcpy(scratchL.data(), outL, numFrames * sizeof(float));
@@ -160,11 +157,11 @@ namespace PrismaUI::Audio {
 
         // Load atomic params once per render block to avoid repeated atomic reads in the hot loop
         const double nodeStartTime = startTime.load(std::memory_order_relaxed);
-        const double nodeStopTime  = stopTime.load(std::memory_order_relaxed);
-        const double nodeDuration  = playbackDuration.load(std::memory_order_relaxed);
-        const bool   nodeLoop      = loop.load(std::memory_order_relaxed);
+        const double nodeStopTime = stopTime.load(std::memory_order_relaxed);
+        const double nodeDuration = playbackDuration.load(std::memory_order_relaxed);
+        const bool nodeLoop = loop.load(std::memory_order_relaxed);
         const double nodeLoopStart = loopStart.load(std::memory_order_relaxed);
-        const double nodeLoopEnd   = loopEnd.load(std::memory_order_relaxed);
+        const double nodeLoopEnd = loopEnd.load(std::memory_order_relaxed);
 
         // Compute duration end sample (relative to startOffset in the buffer)
         uint64_t durationEndSample = UINT64_MAX;
@@ -179,7 +176,9 @@ namespace PrismaUI::Audio {
         if (nodeLoop) {
             if (nodeLoopStart > 0.0) {
                 loopStartSample = static_cast<uint64_t>(nodeLoopStart * buf->sampleRate);
-                loopStartSample = std::min(loopStartSample, static_cast<uint64_t>(bufferLength));
+                // [A4] Clamp to bufferLength-1 to prevent OOB read at ch0[playbackPosition]
+                loopStartSample =
+                    std::min(loopStartSample, static_cast<uint64_t>(bufferLength > 0 ? bufferLength - 1 : 0));
             }
             if (nodeLoopEnd > 0.0) {
                 loopEndSample = static_cast<uint64_t>(nodeLoopEnd * buf->sampleRate);
@@ -233,11 +232,15 @@ namespace PrismaUI::Audio {
             }
 
             // Read sample
-            if (ch0) outL[i] = ch0[playbackPosition];
-            else outL[i] = 0.0f;
+            if (ch0)
+                outL[i] = ch0[playbackPosition];
+            else
+                outL[i] = 0.0f;
 
-            if (ch1) outR[i] = ch1[playbackPosition];
-            else outR[i] = outL[i];  // Mono upmix
+            if (ch1)
+                outR[i] = ch1[playbackPosition];
+            else
+                outR[i] = outL[i];  // Mono upmix
 
             playbackPosition++;
 

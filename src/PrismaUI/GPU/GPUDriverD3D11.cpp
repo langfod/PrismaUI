@@ -190,8 +190,8 @@ namespace PrismaUI::GPU {
                 bitmap->UnlockPixels();
             } else {
                 ultralight::RefPtr<ultralight::Bitmap> mapped_bitmap =
-                    ultralight::Bitmap::Create(bitmap->width(), bitmap->height(), bitmap->format(), res.RowPitch, res.pData,
-                                               res.RowPitch * bitmap->height(), false);
+                    ultralight::Bitmap::Create(bitmap->width(), bitmap->height(), bitmap->format(), res.RowPitch,
+                                               res.pData, res.RowPitch * bitmap->height(), false);
                 ultralight::IntRect dest_rect = {0, 0, (int)bitmap->width(), (int)bitmap->height()};
                 mapped_bitmap->DrawBitmap(dest_rect, dest_rect, bitmap, false);
             }
@@ -200,9 +200,7 @@ namespace PrismaUI::GPU {
         } else {
             // DEFAULT texture (render target): use UpdateSubresource instead of Map
             void* pixels = bitmap->LockPixels();
-            m_Context->UpdateSubresource(
-                entry.Texture.Get(), 0, nullptr,
-                pixels, bitmap->row_bytes(), 0);
+            m_Context->UpdateSubresource(entry.Texture.Get(), 0, nullptr, pixels, bitmap->row_bytes(), 0);
             bitmap->UnlockPixels();
         }
     }
@@ -337,7 +335,8 @@ namespace PrismaUI::GPU {
             memcpy(res.pData, vertices.data, vertices.size);
             m_Context->Unmap(entry.VertexBuffer.Get(), 0);
         } else {
-            logger::error("GPUDriverD3D11::UpdateGeometry: Failed to map vertex buffer for ID {}. HR={:#X}", geometryId, hr);
+            logger::error("GPUDriverD3D11::UpdateGeometry: Failed to map vertex buffer for ID {}. HR={:#X}", geometryId,
+                          hr);
         }
 
         hr = m_Context->Map(entry.IndexBuffer.Get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &res);
@@ -345,7 +344,8 @@ namespace PrismaUI::GPU {
             memcpy(res.pData, indices.data, indices.size);
             m_Context->Unmap(entry.IndexBuffer.Get(), 0);
         } else {
-            logger::error("GPUDriverD3D11::UpdateGeometry: Failed to map index buffer for ID {}. HR={:#X}", geometryId, hr);
+            logger::error("GPUDriverD3D11::UpdateGeometry: Failed to map index buffer for ID {}. HR={:#X}", geometryId,
+                          hr);
         }
     }
 
@@ -619,8 +619,8 @@ namespace PrismaUI::GPU {
             success = false;
         }
 
-        if (!m_PixelShader_FilterDropShadow.Initialize(m_Device.Get(), {filter_dropshadow_ps_data,
-                                                       filter_dropshadow_ps_size})) {
+        if (!m_PixelShader_FilterDropShadow.Initialize(m_Device.Get(),
+                                                       {filter_dropshadow_ps_data, filter_dropshadow_ps_size})) {
             logger::critical("GPUDriverD3D11: Failed to init FilterDropShadow pixel shader.");
             success = false;
         }

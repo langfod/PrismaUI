@@ -26,11 +26,6 @@ namespace PrismaUI::Audio {
     //
     // Producer: ultralightThread (JS bridge calls)
     // Consumer: XAudio2 OnBufferEnd callback thread
-    //
-    // This is safe because:
-    // - PrismaUI routes ALL JSC work through a single-thread executor (ultralightThread)
-    // - XAudio2 calls OnBufferEnd from a single dedicated audio thread
-    // - The ring buffer uses acquire/release atomics with no CAS
     struct AudioCommandQueue {
         static constexpr size_t kCapacity = 256;
 
@@ -39,7 +34,6 @@ namespace PrismaUI::Audio {
             size_t w = writePos_.load(std::memory_order_relaxed);
             size_t nextW = (w + 1) % kCapacity;
 
-            // Full if next write position equals the read position
             if (nextW == readPos_.load(std::memory_order_acquire)) {
                 return false;
             }

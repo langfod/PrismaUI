@@ -1,5 +1,4 @@
 #include "WASMBridgeImports.h"
-#include "WASMRuntime.h"
 
 #include <JavaScriptCore/JavaScript.h>
 #include <wasm_export.h>
@@ -8,6 +7,9 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+#include "WASMRuntime.h"
+
 
 namespace PrismaUI::WASM {
 
@@ -22,11 +24,16 @@ namespace PrismaUI::WASM {
 
     static char ValKindToSigChar(wasm_valkind_t kind) {
         switch (kind) {
-            case WASM_I32: return 'i';
-            case WASM_I64: return 'I';
-            case WASM_F32: return 'f';
-            case WASM_F64: return 'F';
-            default:       return 'i';  // Fallback
+            case WASM_I32:
+                return 'i';
+            case WASM_I64:
+                return 'I';
+            case WASM_F32:
+                return 'f';
+            case WASM_F64:
+                return 'F';
+            default:
+                return 'i';  // Fallback
         }
     }
 
@@ -62,7 +69,6 @@ namespace PrismaUI::WASM {
         void* attachment = wasm_runtime_get_function_attachment(execEnv);
         auto* td = static_cast<ImportContext::TrampolineData*>(attachment);
         if (!td || !td->jsFunc) {
-            // [058] Prevent WAMR reading an uninitialized return slot
             args[0] = 0;
             wasm_module_inst_t mi = wasm_runtime_get_module_inst(execEnv);
             if (mi) wasm_runtime_set_exception(mi, "import function not found");
@@ -110,10 +116,8 @@ namespace PrismaUI::WASM {
 
         // Call the JS function
         JSValueRef exc = nullptr;
-        JSValueRef result = JSObjectCallAsFunction(
-            ctx, td->jsFunc, nullptr,
-            td->paramCount, td->paramCount > 0 ? jsArgs : nullptr,
-            &exc);
+        JSValueRef result = JSObjectCallAsFunction(ctx, td->jsFunc, nullptr, td->paramCount,
+                                                   td->paramCount > 0 ? jsArgs : nullptr, &exc);
 
         if (exc) {
             // Convert JS exception to WASM trap
@@ -150,10 +154,8 @@ namespace PrismaUI::WASM {
     // ResolveImports
     // =========================================================================
 
-    bool ResolveImports(JSContextRef ctx, wasm_module_t wasmModule,
-                        JSValueRef jsImports, ImportContext& outCtx,
+    bool ResolveImports(JSContextRef ctx, wasm_module_t wasmModule, JSValueRef jsImports, ImportContext& outCtx,
                         JSValueRef* exception) {
-
         int32_t importCount = wasm_runtime_get_import_count(wasmModule);
         if (importCount <= 0) {
             return true;  // No imports needed
@@ -173,8 +175,8 @@ namespace PrismaUI::WASM {
             }
             if (allLinked) return true;
 
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Instance: module requires imports but none were provided");
+            JSStringRef errStr =
+                JSStringCreateWithUTF8CString("WebAssembly.Instance: module requires imports but none were provided");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -183,16 +185,16 @@ namespace PrismaUI::WASM {
 
         JSObjectRef importsObj = JSValueToObject(ctx, jsImports, nullptr);
         if (!importsObj) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Instance: imports must be an object");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Instance: imports must be an object");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
             return false;
         }
 
-        // Group imports by module name
-        std::unordered_map<std::string, ImportContext::ModuleSymbols*> moduleMap;
+        // Group imports by module name. Use indices into the deque to avoid
+        // any pointer/iterator stability concerns.
+        std::unordered_map<std::string, size_t> moduleMap;
 
         for (int32_t i = 0; i < importCount; i++) {
             wasm_import_t importInfo;
@@ -207,10 +209,10 @@ namespace PrismaUI::WASM {
                 // during instantiation.
                 // TODO: Support explicit Memory/Table/Global import objects from JS
                 // when use cases arise (e.g., sharing memory between modules).
+                // Unlikely use case though, one wasm module is bad enough.
                 logger::debug("[WASM] Skipping non-function import: {}.{} (kind={})",
                               importInfo.module_name ? importInfo.module_name : "",
-                              importInfo.name ? importInfo.name : "",
-                              static_cast<int>(importInfo.kind));
+                              importInfo.name ? importInfo.name : "", static_cast<int>(importInfo.kind));
                 continue;
             }
 
@@ -223,7 +225,8 @@ namespace PrismaUI::WASM {
             JSStringRelease(modNameJS);
 
             if (!JSValueIsObject(ctx, moduleVal)) {
-                std::string errMsg = "WebAssembly.Instance: import module '" + modName + "' not found in imports object";
+                std::string errMsg =
+                    "WebAssembly.Instance: import module '" + modName + "' not found in imports object";
                 JSStringRef errStr = JSStringCreateWithUTF8CString(errMsg.c_str());
                 JSValueRef errVal = JSValueMakeString(ctx, errStr);
                 JSStringRelease(errStr);
@@ -239,7 +242,8 @@ namespace PrismaUI::WASM {
             JSStringRelease(funcNameJS);
 
             if (!JSValueIsObject(ctx, funcVal)) {
-                std::string errMsg = "WebAssembly.Instance: import '" + modName + "." + funcName + "' not found or not a function";
+                std::string errMsg =
+                    "WebAssembly.Instance: import '" + modName + "." + funcName + "' not found or not a function";
                 JSStringRef errStr = JSStringCreateWithUTF8CString(errMsg.c_str());
                 JSValueRef errVal = JSValueMakeString(ctx, errStr);
                 JSStringRelease(errStr);
@@ -249,7 +253,8 @@ namespace PrismaUI::WASM {
 
             JSObjectRef funcObj = JSValueToObject(ctx, funcVal, nullptr);
             if (!funcObj || !JSObjectIsFunction(ctx, funcObj)) {
-                std::string errMsg = "WebAssembly.Instance: import '" + modName + "." + funcName + "' is not a function";
+                std::string errMsg =
+                    "WebAssembly.Instance: import '" + modName + "." + funcName + "' is not a function";
                 JSStringRef errStr = JSStringCreateWithUTF8CString(errMsg.c_str());
                 JSValueRef errVal = JSValueMakeString(ctx, errStr);
                 JSStringRelease(errStr);
@@ -275,8 +280,7 @@ namespace PrismaUI::WASM {
             }
 
             auto* td = new ImportContext::TrampolineData{
-                ctx, funcObj, paramCount, resultCount,
-                std::move(paramTypes), std::move(resultTypes), funcName};
+                ctx, funcObj, paramCount, resultCount, std::move(paramTypes), std::move(resultTypes), funcName};
             outCtx.trampolines.push_back(td);
 
             // Build WAMR signature string
@@ -286,69 +290,37 @@ namespace PrismaUI::WASM {
             auto mapIt = moduleMap.find(modName);
             if (mapIt == moduleMap.end()) {
                 outCtx.modules.push_back({modName, {}, {}});
-                moduleMap[modName] = &outCtx.modules.back();
+                moduleMap[modName] = outCtx.modules.size() - 1;
                 mapIt = moduleMap.find(modName);
             }
 
-            auto* modSyms = mapIt->second;
+            auto& modSyms = outCtx.modules[mapIt->second];
 
-            // Store the signature string so it stays alive
-            modSyms->signatureStorage.push_back(std::move(sig));
+            // Store signature and function name into stable deque storage
+            modSyms.signatureStorage.push_back(std::move(sig));
+            modSyms.signatureStorage.push_back(std::move(funcName));
 
-            // Build the NativeSymbol entry
+            // Build the NativeSymbol entry — pointers into deque elements are stable
             NativeSymbol sym;
-            sym.symbol = funcName.c_str();  // Temporary — will fix below
+            sym.symbol = modSyms.signatureStorage[modSyms.signatureStorage.size() - 1].c_str();
             sym.func_ptr = reinterpret_cast<void*>(HostFuncTrampoline);
-            sym.signature = modSyms->signatureStorage.back().c_str();
+            sym.signature = modSyms.signatureStorage[modSyms.signatureStorage.size() - 2].c_str();
             sym.attachment = td;
-            modSyms->symbols.push_back(sym);
-        }
-
-        // Now fixup the symbol name pointers — they need to point into stable storage.
-        // The signatureStorage vector owns the strings. We also need stable storage
-        // for the function names. Reuse signatureStorage for name storage too.
-        // We need to rebuild since we used c_str() above from a temporary funcName.
-        // Re-iterate to fix name pointers.
-        {
-            for (auto& modSyms : outCtx.modules) {
-                // We need to store function names persistently. Add them to signatureStorage.
-                std::vector<std::string> nameStorage;
-                for (int32_t i = 0; i < importCount; i++) {
-                    wasm_import_t importInfo;
-                    wasm_runtime_get_import_type(wasmModule, i, &importInfo);
-                    if (importInfo.linked) continue;
-                    if (importInfo.kind != WASM_IMPORT_EXPORT_KIND_FUNC) continue;
-
-                    std::string modName = importInfo.module_name ? importInfo.module_name : "";
-                    if (modName != modSyms.moduleName) continue;
-
-                    std::string funcName = importInfo.name ? importInfo.name : "";
-                    nameStorage.push_back(std::move(funcName));
-                }
-
-                // Now set the symbol name pointers from nameStorage, and move
-                // nameStorage strings into signatureStorage for lifetime.
-                for (size_t s = 0; s < modSyms.symbols.size() && s < nameStorage.size(); s++) {
-                    modSyms.signatureStorage.push_back(std::move(nameStorage[s]));
-                    modSyms.symbols[s].symbol = modSyms.signatureStorage.back().c_str();
-                }
-            }
+            modSyms.symbols.push_back(sym);
         }
 
         // Register all module symbol groups with WAMR
         for (auto& modSyms : outCtx.modules) {
             if (modSyms.symbols.empty()) continue;
 
-            bool ok = wasm_runtime_register_natives_raw(
-                modSyms.moduleName.c_str(),
-                modSyms.symbols.data(),
-                static_cast<uint32_t>(modSyms.symbols.size()));
+            bool ok = wasm_runtime_register_natives_raw(modSyms.moduleName.c_str(), modSyms.symbols.data(),
+                                                        static_cast<uint32_t>(modSyms.symbols.size()));
 
             if (!ok) {
-                std::string errMsg = "WebAssembly.Instance: failed to register native imports for module '" + modSyms.moduleName + "'";
+                std::string errMsg =
+                    "WebAssembly.Instance: failed to register native imports for module '" + modSyms.moduleName + "'";
                 logger::error("[WASM] {}", errMsg);
 
-                // [059] Clean up all protects and previous registrations before failing
                 CleanupImports(outCtx);
 
                 JSStringRef errStr = JSStringCreateWithUTF8CString(errMsg.c_str());
@@ -358,11 +330,10 @@ namespace PrismaUI::WASM {
                 return false;
             }
 
-            logger::info("[WASM] Registered {} native imports for module '{}'",
-                         modSyms.symbols.size(), modSyms.moduleName);
+            logger::info("[WASM] Registered {} native imports for module '{}'", modSyms.symbols.size(),
+                         modSyms.moduleName);
             for (size_t s = 0; s < modSyms.symbols.size(); s++) {
-                logger::info("[WASM]   import[{}]: '{}' sig='{}'",
-                             s,
+                logger::info("[WASM]   import[{}]: '{}' sig='{}'", s,
                              modSyms.symbols[s].symbol ? modSyms.symbols[s].symbol : "?",
                              modSyms.symbols[s].signature ? modSyms.symbols[s].signature : "?");
             }
@@ -385,9 +356,7 @@ namespace PrismaUI::WASM {
         // interfere with future instantiations of other modules.
         for (auto& modSyms : ctx.modules) {
             if (!modSyms.symbols.empty()) {
-                wasm_runtime_unregister_natives(
-                    modSyms.moduleName.c_str(),
-                    modSyms.symbols.data());
+                wasm_runtime_unregister_natives(modSyms.moduleName.c_str(), modSyms.symbols.data());
             }
         }
         ctx.modules.clear();

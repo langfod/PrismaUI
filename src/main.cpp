@@ -20,7 +20,8 @@ SKSEPlugin_Load(const SKSE::LoadInterface *a_skse) {
   logger::init();
   // pattern: [2024-01-01 12:00:00.000] [info] [1234] [sourcefile.cpp:123] Log message
   spdlog::set_pattern("[%Y-%m-%d %T.%e] [%l] [%t] [%s:%#] %v");
-  spdlog::set_level(spdlog::level::trace);
+  spdlog::set_level(spdlog::level::info);
+  
   logger::info("---------------- {} {} by {} ----------------", SKSE::GetPluginName(), SKSE::GetPluginVersion(), SKSE::GetPluginAuthor());
   logger::info("-------------------- Docs and Guides: https://prismaui.dev -------------------");
   logger::info("------------------- built using CommonLibSSE-NG v{} -------------------", COMMONLIBSSE_VERSION);

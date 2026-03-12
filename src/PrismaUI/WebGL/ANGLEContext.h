@@ -31,10 +31,10 @@ namespace PrismaUI::WebGL {
         // DXGI shared texture path (zero-copy cross-device rendering)
         bool useSharedTexturePath = false;
         HANDLE sharedHandle = nullptr;
-        Microsoft::WRL::ComPtr<IDXGIKeyedMutex> skyrimMutex;   // Skyrim's side of the keyed mutex
-        Microsoft::WRL::ComPtr<IDXGIKeyedMutex> angleMutex;    // ANGLE's side of the keyed mutex
+        Microsoft::WRL::ComPtr<IDXGIKeyedMutex> skyrimMutex;         // Skyrim's side of the keyed mutex
+        Microsoft::WRL::ComPtr<IDXGIKeyedMutex> angleMutex;          // ANGLE's side of the keyed mutex
         Microsoft::WRL::ComPtr<ID3D11Texture2D> angleSharedTexture;  // Shared texture opened on ANGLE's device
-        EGLSurface eglSharedSurface = EGL_NO_SURFACE;  // EGL pbuffer backed by shared texture
+        EGLSurface eglSharedSurface = EGL_NO_SURFACE;                // EGL pbuffer backed by shared texture
         bool mutexReleasedThisFrame = false;  // Set by FlushDirtyContexts when ANGLE releases mutex
         bool angleMutexAcquired = false;      // Whether ANGLE currently holds the keyed mutex
 
@@ -43,18 +43,22 @@ namespace PrismaUI::WebGL {
 
         // CSS display size of the canvas (may differ from buffer size when
         // CSS scaling / object-fit is used).  Used for SpriteBatch overlay sizing.
-        float displayWidth = 0.0f;
-        float displayHeight = 0.0f;
+        // Written on JS thread, read on render thread — must be atomic.
+        std::atomic<float> displayWidth{0.0f};
+        std::atomic<float> displayHeight{0.0f};
 
         // Canvas position within the Ultralight view (set by JS shim each frame)
-        float canvasX = 0.0f;
-        float canvasY = 0.0f;
+        // Written on JS thread, read on render thread — must be atomic.
+        std::atomic<float> canvasX{0.0f};
+        std::atomic<float> canvasY{0.0f};
 
         // Whether the canvas should be drawn (computed by JS shim)
-        bool visible = true;
+        // Written on JS thread, read on render thread — must be atomic.
+        std::atomic<bool> visible{true};
 
         // Last update tick from JS (ms since steady_clock epoch)
-        uint64_t lastUpdateMs = 0;
+        // Written on JS thread, read on render thread — must be atomic.
+        std::atomic<uint64_t> lastUpdateMs{0};
 
         // Set by draw calls; cleared after end-of-frame readback
         bool frameDirty = false;
@@ -65,7 +69,7 @@ namespace PrismaUI::WebGL {
 
         bool initialized = false;
 
-        // WebGL2 sync objects: maps uint32_t id → GLsync pointer.
+        // WebGL2 sync objects: maps uint32_t id then GLsync pointer.
         // GLsync is a 64-bit pointer; we never cast it through GLuint.
         std::unordered_map<uint32_t, GLsync> syncObjects;
         std::atomic<uint32_t> nextSyncId{1};

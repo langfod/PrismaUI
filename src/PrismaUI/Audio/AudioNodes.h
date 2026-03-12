@@ -1,10 +1,11 @@
 #pragma once
 
+#include <atomic>
+#include <cstdint>
+
 #include "AudioGraph.h"
 #include "AudioParam.h"
 
-#include <atomic>
-#include <cstdint>
 
 namespace PrismaUI::Audio {
 
@@ -16,8 +17,7 @@ namespace PrismaUI::Audio {
 
         AudioDestinationNode() { type = Type::Destination; }
 
-        void Process(float* outL, float* outR, uint32_t numFrames,
-                     double contextTime, float sampleRate) override;
+        void Process(float* outL, float* outR, uint32_t numFrames, double contextTime, float sampleRate) override;
     };
 
     // ---- GainNode ----
@@ -26,8 +26,7 @@ namespace PrismaUI::Audio {
 
         GainNode() { type = Type::Gain; }
 
-        void Process(float* outL, float* outR, uint32_t numFrames,
-                     double contextTime, float sampleRate) override;
+        void Process(float* outL, float* outR, uint32_t numFrames, double contextTime, float sampleRate) override;
     };
 
     // ---- AudioBufferSourceNode ----
@@ -41,18 +40,17 @@ namespace PrismaUI::Audio {
         std::atomic<bool> started{false};
         std::atomic<bool> ended{false};
         std::atomic<double> startTime{0.0};
-        std::atomic<double> stopTime{-1.0};  // Negative means no stop scheduled
-        std::atomic<double> playbackDuration{-1.0}; // Negative means no duration limit
-        double startOffset = 0.0;            // Only used in Start(), guarded by started fence
-        uint64_t playbackPosition = 0;       // Audio-thread-only after Start()
+        std::atomic<double> stopTime{-1.0};          // Negative means no stop scheduled
+        std::atomic<double> playbackDuration{-1.0};  // Negative means no duration limit
+        double startOffset = 0.0;                    // Only used in Start(), guarded by started fence
+        uint64_t playbackPosition = 0;               // Audio-thread-only after Start()
 
         AudioBufferSourceNode() { type = Type::BufferSource; }
 
         void Start(double when = 0.0, double offset = 0.0, double duration = -1.0);
         void Stop(double when = 0.0);
 
-        void Process(float* outL, float* outR, uint32_t numFrames,
-                     double contextTime, float sampleRate) override;
+        void Process(float* outL, float* outR, uint32_t numFrames, double contextTime, float sampleRate) override;
 
         // Set by the JS bridge; called from the audio thread when playback ends.
         // The flag is polled by a JS-side update mechanism to fire 'onended'.

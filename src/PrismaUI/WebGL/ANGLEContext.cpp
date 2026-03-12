@@ -3,15 +3,16 @@
 #include <EGL/eglext_angle.h>
 #include <dxgi.h>
 #include <spdlog/spdlog.h>
+
 #include <algorithm>
 #include <vector>
 
 // ANGLE EGL extensions for D3D11 interop
 #ifndef EGL_ANGLE_platform_angle
-#define EGL_ANGLE_platform_angle 1
-#define EGL_PLATFORM_ANGLE_ANGLE 0x3202
-#define EGL_PLATFORM_ANGLE_TYPE_ANGLE 0x3203
-#define EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE 0x3208
+    #define EGL_ANGLE_platform_angle 1
+    #define EGL_PLATFORM_ANGLE_ANGLE 0x3202
+    #define EGL_PLATFORM_ANGLE_TYPE_ANGLE 0x3203
+    #define EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE 0x3208
 #endif
 
 namespace PrismaUI::WebGL {
@@ -24,9 +25,7 @@ namespace PrismaUI::WebGL {
     // All access is on the Ultralight thread — no synchronization needed.
     static std::vector<ANGLEContext*> g_activeContexts;
 
-    std::span<ANGLEContext* const> GetActiveContexts() {
-        return g_activeContexts;
-    }
+    std::span<ANGLEContext* const> GetActiveContexts() { return g_activeContexts; }
 
     // Function pointer types for ANGLE EGL extensions
     using PFNEGLGETPLATFORMDISPLAYEXTPROC = EGLDisplay(EGLAPIENTRY*)(EGLenum, void*, const EGLint*);
@@ -55,14 +54,9 @@ namespace PrismaUI::WebGL {
         // fail (glClear works but glDrawElements produces zero pixels), likely
         // due to D3D11 state pollution from Ultralight and the game engine.
         // With its own device, ANGLE has full control over D3D11 state.
-        const EGLint displayAttribs[] = {
-            EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE,
-            EGL_NONE};
+        const EGLint displayAttribs[] = {EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE, EGL_NONE};
 
-        g_ANGLEDisplay = eglGetPlatformDisplayEXT(
-            EGL_PLATFORM_ANGLE_ANGLE,
-            EGL_DEFAULT_DISPLAY,
-            displayAttribs);
+        g_ANGLEDisplay = eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE, EGL_DEFAULT_DISPLAY, displayAttribs);
 
         if (g_ANGLEDisplay == EGL_NO_DISPLAY) {
             logger::error("[WebGL] eglGetPlatformDisplayEXT(EGL_PLATFORM_ANGLE_ANGLE) failed: 0x{:X}", eglGetError());
@@ -111,8 +105,8 @@ namespace PrismaUI::WebGL {
 
         // Log device info for diagnostics
         D3D_FEATURE_LEVEL featureLevel = device->GetFeatureLevel();
-        logger::info("[WebGL] CreateSharedTexture: {}x{}, device feature level: 0x{:X}",
-                     width, height, static_cast<uint32_t>(featureLevel));
+        logger::info("[WebGL] CreateSharedTexture: {}x{}, device feature level: 0x{:X}", width, height,
+                     static_cast<uint32_t>(featureLevel));
 
         // Try keyed-mutex shared texture (needed for zero-copy DXGI path)
         bool sharingReady = false;
@@ -214,10 +208,8 @@ namespace PrismaUI::WebGL {
         ctx->angleSharedTexture.Reset();
         ctx->angleMutex.Reset();
 
-        HRESULT hr = angleDevice->OpenSharedResource(
-            ctx->sharedHandle,
-            __uuidof(ID3D11Texture2D),
-            reinterpret_cast<void**>(ctx->angleSharedTexture.GetAddressOf()));
+        HRESULT hr = angleDevice->OpenSharedResource(ctx->sharedHandle, __uuidof(ID3D11Texture2D),
+                                                     reinterpret_cast<void**>(ctx->angleSharedTexture.GetAddressOf()));
         if (FAILED(hr)) {
             logger::warn("[WebGL] Shared texture: OpenSharedResource failed: 0x{:X}", static_cast<uint32_t>(hr));
             return false;
@@ -226,7 +218,8 @@ namespace PrismaUI::WebGL {
         // Get keyed mutex on ANGLE's side
         hr = ctx->angleSharedTexture.As(&ctx->angleMutex);
         if (FAILED(hr)) {
-            logger::warn("[WebGL] Shared texture: failed to get ANGLE-side keyed mutex: 0x{:X}", static_cast<uint32_t>(hr));
+            logger::warn("[WebGL] Shared texture: failed to get ANGLE-side keyed mutex: 0x{:X}",
+                         static_cast<uint32_t>(hr));
             ctx->angleSharedTexture.Reset();
             return false;
         }
@@ -234,20 +227,18 @@ namespace PrismaUI::WebGL {
         // Create EGL pbuffer surface backed by the shared texture.
         // ANGLE's EGL_ANGLE_d3d_texture_client_buffer extension allows creating
         // a surface from an application-provided D3D11 texture.
-        const EGLint surfaceAttribs[] = {
-            EGL_WIDTH, static_cast<EGLint>(ctx->canvasWidth),
-            EGL_HEIGHT, static_cast<EGLint>(ctx->canvasHeight),
-            EGL_TEXTURE_FORMAT, EGL_TEXTURE_RGBA,
-            EGL_TEXTURE_TARGET, EGL_TEXTURE_2D,
-            EGL_NONE
-        };
+        const EGLint surfaceAttribs[] = {EGL_WIDTH,
+                                         static_cast<EGLint>(ctx->canvasWidth),
+                                         EGL_HEIGHT,
+                                         static_cast<EGLint>(ctx->canvasHeight),
+                                         EGL_TEXTURE_FORMAT,
+                                         EGL_TEXTURE_RGBA,
+                                         EGL_TEXTURE_TARGET,
+                                         EGL_TEXTURE_2D,
+                                         EGL_NONE};
 
         ctx->eglSharedSurface = eglCreatePbufferFromClientBuffer(
-            ctx->eglDisplay,
-            EGL_D3D_TEXTURE_ANGLE,
-            ctx->angleSharedTexture.Get(),
-            ctx->eglConfig,
-            surfaceAttribs);
+            ctx->eglDisplay, EGL_D3D_TEXTURE_ANGLE, ctx->angleSharedTexture.Get(), ctx->eglConfig, surfaceAttribs);
 
         if (ctx->eglSharedSurface == EGL_NO_SURFACE) {
             logger::warn("[WebGL] Shared texture: eglCreatePbufferFromClientBuffer failed: 0x{:X}", eglGetError());
@@ -290,16 +281,23 @@ namespace PrismaUI::WebGL {
         ctx->canvasHeight = height;
 
         // Choose an EGL config
-        const EGLint configAttribs[] = {
-            EGL_RED_SIZE, 8,
-            EGL_GREEN_SIZE, 8,
-            EGL_BLUE_SIZE, 8,
-            EGL_ALPHA_SIZE, 8,
-            EGL_DEPTH_SIZE, 24,
-            EGL_STENCIL_SIZE, 8,
-            EGL_RENDERABLE_TYPE, EGL_OPENGL_ES3_BIT,
-            EGL_SURFACE_TYPE, EGL_PBUFFER_BIT,
-            EGL_NONE};
+        const EGLint configAttribs[] = {EGL_RED_SIZE,
+                                        8,
+                                        EGL_GREEN_SIZE,
+                                        8,
+                                        EGL_BLUE_SIZE,
+                                        8,
+                                        EGL_ALPHA_SIZE,
+                                        8,
+                                        EGL_DEPTH_SIZE,
+                                        24,
+                                        EGL_STENCIL_SIZE,
+                                        8,
+                                        EGL_RENDERABLE_TYPE,
+                                        EGL_OPENGL_ES3_BIT,
+                                        EGL_SURFACE_TYPE,
+                                        EGL_PBUFFER_BIT,
+                                        EGL_NONE};
 
         EGLint numConfigs = 0;
         if (!eglChooseConfig(g_ANGLEDisplay, configAttribs, &ctx->eglConfig, 1, &numConfigs) || numConfigs == 0) {
@@ -315,10 +313,8 @@ namespace PrismaUI::WebGL {
         // Create a regular pbuffer surface on ANGLE's own D3D11 device.
         // This is used as the render target when the shared texture path
         // is unavailable (CPU readback fallback).
-        const EGLint surfaceAttribs[] = {
-            EGL_WIDTH, static_cast<EGLint>(width),
-            EGL_HEIGHT, static_cast<EGLint>(height),
-            EGL_NONE};
+        const EGLint surfaceAttribs[] = {EGL_WIDTH, static_cast<EGLint>(width), EGL_HEIGHT, static_cast<EGLint>(height),
+                                         EGL_NONE};
 
         ctx->eglSurface = eglCreatePbufferSurface(g_ANGLEDisplay, ctx->eglConfig, surfaceAttribs);
         if (ctx->eglSurface == EGL_NO_SURFACE) {
@@ -328,9 +324,7 @@ namespace PrismaUI::WebGL {
         }
 
         // Create an OpenGL ES 3.0 context
-        const EGLint contextAttribs[] = {
-            EGL_CONTEXT_CLIENT_VERSION, 3,
-            EGL_NONE};
+        const EGLint contextAttribs[] = {EGL_CONTEXT_CLIENT_VERSION, 3, EGL_NONE};
 
         ctx->eglContext = eglCreateContext(g_ANGLEDisplay, ctx->eglConfig, EGL_NO_CONTEXT, contextAttribs);
         if (ctx->eglContext == EGL_NO_CONTEXT) {
@@ -381,8 +375,8 @@ namespace PrismaUI::WebGL {
             logger::info("[WebGL] Using CPU readback path (shared texture unavailable)");
         }
 
-        const char* renderer  = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
-        const char* version   = reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        const char* renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+        const char* version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
         const char* extensions = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
         logger::info("[WebGL] Created WebGL context: {}x{}, GL_RENDERER={}", width, height,
                      renderer ? renderer : "<unknown>");
@@ -418,10 +412,8 @@ namespace PrismaUI::WebGL {
         bool sharedTextureReady = CreateSharedTexture(ctx, width, height, device);
 
         // Create new pbuffer surface on ANGLE's own device (fallback target)
-        const EGLint surfaceAttribs[] = {
-            EGL_WIDTH, static_cast<EGLint>(width),
-            EGL_HEIGHT, static_cast<EGLint>(height),
-            EGL_NONE};
+        const EGLint surfaceAttribs[] = {EGL_WIDTH, static_cast<EGLint>(width), EGL_HEIGHT, static_cast<EGLint>(height),
+                                         EGL_NONE};
 
         ctx->eglSurface = eglCreatePbufferSurface(g_ANGLEDisplay, ctx->eglConfig, surfaceAttribs);
         if (ctx->eglSurface == EGL_NO_SURFACE) {
@@ -445,7 +437,8 @@ namespace PrismaUI::WebGL {
                 ctx->readbackFlipped.clear();
                 ctx->readbackFlipped.shrink_to_fit();
             } else {
-                logger::error("[WebGL] ResizeWebGLContext: eglMakeCurrent failed switching to shared surface, reverting");
+                logger::error(
+                    "[WebGL] ResizeWebGLContext: eglMakeCurrent failed switching to shared surface, reverting");
                 ctx->eglSurface = oldSurface;
                 eglMakeCurrent(g_ANGLEDisplay, oldSurface, oldSurface, ctx->eglContext);
                 TeardownSharedTexturePath(ctx);
@@ -486,9 +479,8 @@ namespace PrismaUI::WebGL {
             return;
         }
 
-        g_activeContexts.erase(
-            std::remove(g_activeContexts.begin(), g_activeContexts.end(), ctx),
-            g_activeContexts.end());
+        g_activeContexts.erase(std::remove(g_activeContexts.begin(), g_activeContexts.end(), ctx),
+                               g_activeContexts.end());
 
         if (g_ANGLEDisplay != EGL_NO_DISPLAY) {
             eglMakeCurrent(g_ANGLEDisplay, EGL_NO_SURFACE, EGL_NO_SURFACE, EGL_NO_CONTEXT);
@@ -499,8 +491,8 @@ namespace PrismaUI::WebGL {
 
             // If using shared path, eglSurface == eglSharedSurface — destroy once.
             // If using fallback path, eglSurface is the regular pbuffer.
-            bool surfaceIsShared = (ctx->eglSurface == ctx->eglSharedSurface &&
-                                    ctx->eglSharedSurface != EGL_NO_SURFACE);
+            bool surfaceIsShared =
+                (ctx->eglSurface == ctx->eglSharedSurface && ctx->eglSharedSurface != EGL_NO_SURFACE);
 
             // Tear down shared texture path (destroys eglSharedSurface)
             TeardownSharedTexturePath(ctx);
@@ -524,12 +516,11 @@ namespace PrismaUI::WebGL {
     void ShutdownANGLE() {
         if (g_ANGLEDisplay != EGL_NO_DISPLAY) {
             if (!g_activeContexts.empty()) {
-                logger::warn("[WebGL] ShutdownANGLE: {} contexts still active, cleaning up",
-                             g_activeContexts.size());
-                for (auto* ctx : g_activeContexts) {
-                    if (ctx && ctx->eglContext != EGL_NO_CONTEXT) {
-                        eglDestroyContext(g_ANGLEDisplay, ctx->eglContext);
-                    }
+                logger::warn("[WebGL] ShutdownANGLE: {} contexts still active, cleaning up", g_activeContexts.size());
+                // Copy the vector: DestroyWebGLContext modifies g_activeContexts
+                auto remaining = g_activeContexts;
+                for (auto* ctx : remaining) {
+                    DestroyWebGLContext(ctx);
                 }
                 g_activeContexts.clear();
             }

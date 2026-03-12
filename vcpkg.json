@@ -13,9 +13,6 @@
     "zlib",
     "egl-registry",
     "opengl-registry",
-    "angle",
-    {
-      "name": "directxtex",
-      "features": ["dx11"]
-    }  ]
+    "angle"
+   ]
 }

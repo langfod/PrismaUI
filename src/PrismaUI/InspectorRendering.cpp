@@ -42,6 +42,12 @@ namespace PrismaUI::Inspector {
             return;
         }
 
+        // RAII guard: ensure UnlockPixels is always called even if resize() throws
+        struct PixelGuard {
+            RefPtr<Bitmap>& bmp;
+            ~PixelGuard() { bmp->UnlockPixels(); }
+        } guard{bitmap};
+
         const uint32_t width = bitmap->width();
         const uint32_t height = bitmap->height();
         const uint32_t stride = bitmap->row_bytes();
@@ -62,8 +68,6 @@ namespace PrismaUI::Inspector {
             viewData->inspectorBufferStride = stride;
             viewData->inspectorFrameReady.store(true);
         }
-
-        bitmap->UnlockPixels();
     }
 
     void CopyInspectorPixelsToTexture(PrismaView* viewData, void* pixels, uint32_t width, uint32_t height,

@@ -1,7 +1,9 @@
+#include <spdlog/spdlog.h>
+
+#include <vector>
+
 #include "WebGLBridgeInternal.h"
 
-#include <spdlog/spdlog.h>
-#include <vector>
 
 namespace PrismaUI::WebGL {
 
@@ -9,38 +11,63 @@ namespace PrismaUI::WebGL {
     static size_t GetBytesPerPixel(GLenum format, GLenum type) {
         size_t channels = 0;
         switch (format) {
-            case GL_RGBA:           channels = 4; break;
-            case GL_RGB:            channels = 3; break;
+            case GL_RGBA:
+                channels = 4;
+                break;
+            case GL_RGB:
+                channels = 3;
+                break;
             case GL_LUMINANCE_ALPHA:
-            case GL_RG:             channels = 2; break;
+            case GL_RG:
+                channels = 2;
+                break;
             case GL_LUMINANCE:
             case GL_ALPHA:
-            case GL_RED:            channels = 1; break;
-            case GL_RGBA_INTEGER:   channels = 4; break;
-            case GL_RGB_INTEGER:    channels = 3; break;
-            case GL_RG_INTEGER:     channels = 2; break;
-            case GL_RED_INTEGER:    channels = 1; break;
-            default:                channels = 4; break;
+            case GL_RED:
+                channels = 1;
+                break;
+            case GL_RGBA_INTEGER:
+                channels = 4;
+                break;
+            case GL_RGB_INTEGER:
+                channels = 3;
+                break;
+            case GL_RG_INTEGER:
+                channels = 2;
+                break;
+            case GL_RED_INTEGER:
+                channels = 1;
+                break;
+            default:
+                channels = 4;
+                break;
         }
 
         switch (type) {
             case GL_UNSIGNED_BYTE:
-            case GL_BYTE:                   return channels;
+            case GL_BYTE:
+                return channels;
             case GL_UNSIGNED_SHORT:
             case GL_SHORT:
-            case GL_HALF_FLOAT:             return channels * 2;
+            case GL_HALF_FLOAT:
+                return channels * 2;
             case GL_UNSIGNED_INT:
             case GL_INT:
-            case GL_FLOAT:                  return channels * 4;
+            case GL_FLOAT:
+                return channels * 4;
             case GL_UNSIGNED_SHORT_5_6_5:
             case GL_UNSIGNED_SHORT_4_4_4_4:
-            case GL_UNSIGNED_SHORT_5_5_5_1: return 2;
+            case GL_UNSIGNED_SHORT_5_5_5_1:
+                return 2;
             case GL_UNSIGNED_INT_2_10_10_10_REV:
             case GL_UNSIGNED_INT_10F_11F_11F_REV:
             case GL_UNSIGNED_INT_5_9_9_9_REV:
-            case GL_UNSIGNED_INT_24_8:      return 4;
-            case GL_FLOAT_32_UNSIGNED_INT_24_8_REV: return 8;
-            default:                        return channels;
+            case GL_UNSIGNED_INT_24_8:
+                return 4;
+            case GL_FLOAT_32_UNSIGNED_INT_24_8_REV:
+                return 8;
+            default:
+                return channels;
         }
     }
 
@@ -48,8 +75,8 @@ namespace PrismaUI::WebGL {
     // Textures
     // =========================================================================
 
-    JSValueRef GL_createTexture(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                size_t, const JSValueRef[], JSValueRef*) {
+    JSValueRef GL_createTexture(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t, const JSValueRef[],
+                                JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized) return JSValueMakeNull(ctx);
         GLuint tex = 0;
@@ -57,8 +84,8 @@ namespace PrismaUI::WebGL {
         return MakeGLObject(ctx, "WebGLTexture", tex);
     }
 
-    JSValueRef GL_deleteTexture(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_deleteTexture(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 1) return JSValueMakeUndefined(ctx);
         GLuint tex = GetGLId(ctx, argv[0]);
@@ -66,8 +93,8 @@ namespace PrismaUI::WebGL {
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_bindTexture(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                              size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_bindTexture(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                              const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
         GLenum target = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
@@ -76,46 +103,44 @@ namespace PrismaUI::WebGL {
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_activeTexture(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_activeTexture(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 1) return JSValueMakeUndefined(ctx);
         glActiveTexture(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)));
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_texParameteri(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_texParameteri(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 3) return JSValueMakeUndefined(ctx);
-        glTexParameteri(
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[1], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[2], nullptr)));
+        glTexParameteri(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+                        static_cast<GLenum>(JSValueToNumber(ctx, argv[1], nullptr)),
+                        static_cast<GLint>(JSValueToNumber(ctx, argv[2], nullptr)));
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_texParameterf(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_texParameterf(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 3) return JSValueMakeUndefined(ctx);
-        glTexParameterf(
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[1], nullptr)),
-            static_cast<GLfloat>(JSValueToNumber(ctx, argv[2], nullptr)));
+        glTexParameterf(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+                        static_cast<GLenum>(JSValueToNumber(ctx, argv[1], nullptr)),
+                        static_cast<GLfloat>(JSValueToNumber(ctx, argv[2], nullptr)));
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_generateMipmap(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                 size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_generateMipmap(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                 const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 1) return JSValueMakeUndefined(ctx);
         glGenerateMipmap(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)));
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_texImage2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                             size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_texImage2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                             const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 6) return JSValueMakeUndefined(ctx);
 
@@ -148,8 +173,8 @@ namespace PrismaUI::WebGL {
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_texSubImage2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_texSubImage2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 9) return JSValueMakeUndefined(ctx);
 
@@ -164,8 +189,8 @@ namespace PrismaUI::WebGL {
 
         static bool loggedFirstUpload = false;
         if (!loggedFirstUpload) {
-            logger::info("[WebGL-DBG] GL_texSubImage2D: first upload {}x{} format=0x{:X} type=0x{:X}",
-                width, height, format, type);
+            logger::info("[WebGL-DBG] GL_texSubImage2D: first upload {}x{} format=0x{:X} type=0x{:X}", width, height,
+                         format, type);
             loggedFirstUpload = true;
         }
 
@@ -186,8 +211,8 @@ namespace PrismaUI::WebGL {
                 ptr = static_cast<uint8_t*>(abPtr) + taByteOffset;
                 static bool loggedOffsetFix = false;
                 if (!loggedOffsetFix) {
-                    logger::info("[WebGL-DBG] texSubImage2D: fixed TypedArray ptr (ABbase={}, +offset={} -> {})",
-                        abPtr, taByteOffset, ptr);
+                    logger::info("[WebGL-DBG] texSubImage2D: fixed TypedArray ptr (ABbase={}, +offset={} -> {})", abPtr,
+                                 taByteOffset, ptr);
                     loggedOffsetFix = true;
                 }
             }
@@ -202,11 +227,16 @@ namespace PrismaUI::WebGL {
                 if (ptr && byteLen >= 4) {
                     // Sample from middle of data
                     size_t mid = (byteLen / 2) & ~3;
-                    sample[0] = bytes[mid]; sample[1] = bytes[mid+1];
-                    sample[2] = bytes[mid+2]; sample[3] = bytes[mid+3];
+                    sample[0] = bytes[mid];
+                    sample[1] = bytes[mid + 1];
+                    sample[2] = bytes[mid + 2];
+                    sample[3] = bytes[mid + 3];
                     // Check ALL bytes, not just first 1024
                     for (size_t i = 0; i < byteLen; i++) {
-                        if (bytes[i] != 0) { allZero = false; break; }
+                        if (bytes[i] != 0) {
+                            allZero = false;
+                            break;
+                        }
                     }
                 }
 
@@ -216,21 +246,24 @@ namespace PrismaUI::WebGL {
                 if (abPtr && taByteOffset + byteLen <= JSObjectGetArrayBufferByteLength(ctx, backingAB, nullptr)) {
                     auto* abBytes = static_cast<uint8_t*>(abPtr) + taByteOffset;
                     size_t mid = (byteLen / 2) & ~3;
-                    abSample[0] = abBytes[mid]; abSample[1] = abBytes[mid+1];
-                    abSample[2] = abBytes[mid+2]; abSample[3] = abBytes[mid+3];
+                    abSample[0] = abBytes[mid];
+                    abSample[1] = abBytes[mid + 1];
+                    abSample[2] = abBytes[mid + 2];
+                    abSample[3] = abBytes[mid + 3];
                     for (size_t i = 0; i < byteLen && i < 4096; i++) {
-                        if (abBytes[i] != 0) { abAllZero = false; break; }
+                        if (abBytes[i] != 0) {
+                            abAllZero = false;
+                            break;
+                        }
                     }
                 }
 
-                logger::info("[WebGL-DBG] texSubImage2D #{}: TAptr={} TAbyteOff={} ABptr={} TAptr==AB+off? {} byteLen={} allZero={} mid=({},{},{},{}) AB+off_allZero={} AB+off_mid=({},{},{},{}) GL_err=0x{:X}",
-                    uploadCount, ptr, taByteOffset, abPtr,
-                    (ptr == static_cast<uint8_t*>(abPtr) + taByteOffset),
-                    byteLen, allZero,
-                    sample[0], sample[1], sample[2], sample[3],
-                    abAllZero,
-                    abSample[0], abSample[1], abSample[2], abSample[3],
-                    glGetError());
+                logger::info(
+                    "[WebGL-DBG] texSubImage2D #{}: TAptr={} TAbyteOff={} ABptr={} TAptr==AB+off? {} byteLen={} "
+                    "allZero={} mid=({},{},{},{}) AB+off_allZero={} AB+off_mid=({},{},{},{})",
+                    uploadCount, ptr, taByteOffset, abPtr, (ptr == static_cast<uint8_t*>(abPtr) + taByteOffset),
+                    byteLen, allZero, sample[0], sample[1], sample[2], sample[3], abAllZero, abSample[0], abSample[1],
+                    abSample[2], abSample[3]);
             }
 
             glTexSubImage2D(target, level, xoffset, yoffset, width, height, format, type, ptr);
@@ -245,40 +278,38 @@ namespace PrismaUI::WebGL {
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_copyTexImage2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                  size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_copyTexImage2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                 const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 8) return JSValueMakeUndefined(ctx);
-        glCopyTexImage2D(
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[5], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[6], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[7], nullptr)));
+        glCopyTexImage2D(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+                         static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
+                         static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr)),
+                         static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr)),
+                         static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr)),
+                         static_cast<GLsizei>(JSValueToNumber(ctx, argv[5], nullptr)),
+                         static_cast<GLsizei>(JSValueToNumber(ctx, argv[6], nullptr)),
+                         static_cast<GLint>(JSValueToNumber(ctx, argv[7], nullptr)));
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_copyTexSubImage2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                     size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_copyTexSubImage2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                    const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 8) return JSValueMakeUndefined(ctx);
-        glCopyTexSubImage2D(
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[2], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[5], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[6], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[7], nullptr)));
+        glCopyTexSubImage2D(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+                            static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
+                            static_cast<GLint>(JSValueToNumber(ctx, argv[2], nullptr)),
+                            static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr)),
+                            static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr)),
+                            static_cast<GLint>(JSValueToNumber(ctx, argv[5], nullptr)),
+                            static_cast<GLsizei>(JSValueToNumber(ctx, argv[6], nullptr)),
+                            static_cast<GLsizei>(JSValueToNumber(ctx, argv[7], nullptr)));
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_readPixels(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                              size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_readPixels(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                             const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 7) return JSValueMakeUndefined(ctx);
         GLint x = static_cast<GLint>(JSValueToNumber(ctx, argv[0], nullptr));
@@ -292,7 +323,11 @@ namespace PrismaUI::WebGL {
             void* ptr = GetTypedArrayDataPtr(ctx, dataObj);
             if (ptr) {
                 size_t bytesPerPixel = GetBytesPerPixel(format, type);
-                size_t requiredBytes = static_cast<size_t>(width) * height * bytesPerPixel;
+                GLint packAlign = 4;
+                glGetIntegerv(GL_PACK_ALIGNMENT, &packAlign);
+                size_t rowBytes = static_cast<size_t>(width) * bytesPerPixel;
+                size_t paddedRow = (rowBytes + packAlign - 1) / packAlign * packAlign;
+                size_t requiredBytes = paddedRow * height;
                 size_t bufferBytes = JSObjectGetTypedArrayByteLength(ctx, dataObj, nullptr);
                 if (requiredBytes > bufferBytes) {
                     logger::warn("[WebGL] readPixels: buffer too small ({} < {})", bufferBytes, requiredBytes);
@@ -308,8 +343,8 @@ namespace PrismaUI::WebGL {
     // Framebuffers
     // =========================================================================
 
-    JSValueRef GL_createFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                    size_t, const JSValueRef[], JSValueRef*) {
+    JSValueRef GL_createFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t, const JSValueRef[],
+                                    JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized) return JSValueMakeNull(ctx);
         GLuint fbo = 0;
@@ -317,8 +352,8 @@ namespace PrismaUI::WebGL {
         return MakeGLObject(ctx, "WebGLFramebuffer", fbo);
     }
 
-    JSValueRef GL_deleteFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                    size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_deleteFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                    const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 1) return JSValueMakeUndefined(ctx);
         GLuint fbo = GetGLId(ctx, argv[0]);
@@ -326,8 +361,8 @@ namespace PrismaUI::WebGL {
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_bindFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                  size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_bindFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                  const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
         GLenum target = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
@@ -336,37 +371,32 @@ namespace PrismaUI::WebGL {
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_framebufferTexture2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                       size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_framebufferTexture2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                       const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 5) return JSValueMakeUndefined(ctx);
-        glFramebufferTexture2D(
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[1], nullptr)),
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr)),
-            GetGLId(ctx, argv[3]),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr)));
+        glFramebufferTexture2D(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+                               static_cast<GLenum>(JSValueToNumber(ctx, argv[1], nullptr)),
+                               static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr)), GetGLId(ctx, argv[3]),
+                               static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr)));
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_checkFramebufferStatus(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                         size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_checkFramebufferStatus(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                         const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 1) return JSValueMakeNumber(ctx, 0);
-        GLenum result = glCheckFramebufferStatus(
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)));
+        GLenum result = glCheckFramebufferStatus(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)));
         return JSValueMakeNumber(ctx, static_cast<double>(result));
     }
 
-    JSValueRef GL_framebufferRenderbuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                          size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_framebufferRenderbuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                          const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 4) return JSValueMakeUndefined(ctx);
-        glFramebufferRenderbuffer(
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[1], nullptr)),
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr)),
-            GetGLId(ctx, argv[3]));
+        glFramebufferRenderbuffer(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+                                  static_cast<GLenum>(JSValueToNumber(ctx, argv[1], nullptr)),
+                                  static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr)), GetGLId(ctx, argv[3]));
         return JSValueMakeUndefined(ctx);
     }
 
@@ -374,8 +404,8 @@ namespace PrismaUI::WebGL {
     // Renderbuffers
     // =========================================================================
 
-    JSValueRef GL_createRenderbuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                     size_t, const JSValueRef[], JSValueRef*) {
+    JSValueRef GL_createRenderbuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t, const JSValueRef[],
+                                     JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized) return JSValueMakeNull(ctx);
         GLuint rbo = 0;
@@ -383,8 +413,8 @@ namespace PrismaUI::WebGL {
         return MakeGLObject(ctx, "WebGLRenderbuffer", rbo);
     }
 
-    JSValueRef GL_deleteRenderbuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                     size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_deleteRenderbuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                     const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 1) return JSValueMakeUndefined(ctx);
         GLuint rbo = GetGLId(ctx, argv[0]);
@@ -392,25 +422,22 @@ namespace PrismaUI::WebGL {
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_bindRenderbuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                   size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_bindRenderbuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                   const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
-        glBindRenderbuffer(
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
-            GetGLId(ctx, argv[1]));
+        glBindRenderbuffer(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)), GetGLId(ctx, argv[1]));
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_renderbufferStorage(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                      size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_renderbufferStorage(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                      const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 4) return JSValueMakeUndefined(ctx);
-        glRenderbufferStorage(
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[1], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[2], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr)));
+        glRenderbufferStorage(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+                              static_cast<GLenum>(JSValueToNumber(ctx, argv[1], nullptr)),
+                              static_cast<GLsizei>(JSValueToNumber(ctx, argv[2], nullptr)),
+                              static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr)));
         return JSValueMakeUndefined(ctx);
     }
 
@@ -418,30 +445,29 @@ namespace PrismaUI::WebGL {
     // Drawing
     // =========================================================================
 
-    JSValueRef GL_drawArrays(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                             size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_drawArrays(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                             const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 3) return JSValueMakeUndefined(ctx);
 
         static bool loggedFirstDraw = false;
         if (!loggedFirstDraw) {
             logger::info("[WebGL-DBG] GL_drawArrays: first draw call (mode={}, first={}, count={})",
-                static_cast<int>(JSValueToNumber(ctx, argv[0], nullptr)),
-                static_cast<int>(JSValueToNumber(ctx, argv[1], nullptr)),
-                static_cast<int>(JSValueToNumber(ctx, argv[2], nullptr)));
+                         static_cast<int>(JSValueToNumber(ctx, argv[0], nullptr)),
+                         static_cast<int>(JSValueToNumber(ctx, argv[1], nullptr)),
+                         static_cast<int>(JSValueToNumber(ctx, argv[2], nullptr)));
             loggedFirstDraw = true;
         }
 
-        glDrawArrays(
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[2], nullptr)));
+        glDrawArrays(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+                     static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
+                     static_cast<GLsizei>(JSValueToNumber(ctx, argv[2], nullptr)));
         c->frameDirty = true;
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_drawElements(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                               size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_drawElements(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                               const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 4) return JSValueMakeUndefined(ctx);
 
@@ -460,21 +486,20 @@ namespace PrismaUI::WebGL {
     // Instanced Drawing (WebGL2)
     // =========================================================================
 
-    JSValueRef GL_drawArraysInstanced(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                       size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_drawArraysInstanced(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                      const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 4) return JSValueMakeUndefined(ctx);
-        glDrawArraysInstanced(
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[2], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr)));
+        glDrawArraysInstanced(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+                              static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
+                              static_cast<GLsizei>(JSValueToNumber(ctx, argv[2], nullptr)),
+                              static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr)));
         c->frameDirty = true;
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_drawElementsInstanced(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                         size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_drawElementsInstanced(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                        const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 5) return JSValueMakeUndefined(ctx);
 
@@ -490,8 +515,8 @@ namespace PrismaUI::WebGL {
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_drawRangeElements(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                     size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_drawRangeElements(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                    const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 6) return JSValueMakeUndefined(ctx);
 
@@ -508,13 +533,12 @@ namespace PrismaUI::WebGL {
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_vertexAttribDivisor(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                       size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_vertexAttribDivisor(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                      const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
-        glVertexAttribDivisor(
-            static_cast<GLuint>(JSValueToNumber(ctx, argv[0], nullptr)),
-            static_cast<GLuint>(JSValueToNumber(ctx, argv[1], nullptr)));
+        glVertexAttribDivisor(static_cast<GLuint>(JSValueToNumber(ctx, argv[0], nullptr)),
+                              static_cast<GLuint>(JSValueToNumber(ctx, argv[1], nullptr)));
         return JSValueMakeUndefined(ctx);
     }
 
@@ -522,35 +546,33 @@ namespace PrismaUI::WebGL {
     // 3D Textures & Storage (WebGL2)
     // =========================================================================
 
-    JSValueRef GL_texStorage2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_texStorage2D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                               const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 5) return JSValueMakeUndefined(ctx);
-        glTexStorage2D(
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[1], nullptr)),
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[4], nullptr)));
+        glTexStorage2D(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+                       static_cast<GLsizei>(JSValueToNumber(ctx, argv[1], nullptr)),
+                       static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr)),
+                       static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr)),
+                       static_cast<GLsizei>(JSValueToNumber(ctx, argv[4], nullptr)));
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_texStorage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_texStorage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                               const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 6) return JSValueMakeUndefined(ctx);
-        glTexStorage3D(
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[1], nullptr)),
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[4], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[5], nullptr)));
+        glTexStorage3D(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+                       static_cast<GLsizei>(JSValueToNumber(ctx, argv[1], nullptr)),
+                       static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr)),
+                       static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr)),
+                       static_cast<GLsizei>(JSValueToNumber(ctx, argv[4], nullptr)),
+                       static_cast<GLsizei>(JSValueToNumber(ctx, argv[5], nullptr)));
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_texImage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                              size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_texImage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                             const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 10) return JSValueMakeUndefined(ctx);
         GLenum target = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
@@ -564,8 +586,8 @@ namespace PrismaUI::WebGL {
         GLenum type = static_cast<GLenum>(JSValueToNumber(ctx, argv[8], nullptr));
 
         const void* data = nullptr;
-        if (argc > 9 && JSValueIsObject(ctx, argv[9]) &&
-            !JSValueIsNull(ctx, argv[9]) && !JSValueIsUndefined(ctx, argv[9])) {
+        if (argc > 9 && JSValueIsObject(ctx, argv[9]) && !JSValueIsNull(ctx, argv[9]) &&
+            !JSValueIsUndefined(ctx, argv[9])) {
             JSObjectRef arr = JSValueToObject(ctx, argv[9], nullptr);
             data = GetTypedArrayDataPtr(ctx, arr);
         }
@@ -573,8 +595,8 @@ namespace PrismaUI::WebGL {
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_texSubImage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                 size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_texSubImage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 11) return JSValueMakeUndefined(ctx);
         GLenum target = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
@@ -589,8 +611,8 @@ namespace PrismaUI::WebGL {
         GLenum type = static_cast<GLenum>(JSValueToNumber(ctx, argv[9], nullptr));
 
         const void* data = nullptr;
-        if (argc > 10 && JSValueIsObject(ctx, argv[10]) &&
-            !JSValueIsNull(ctx, argv[10]) && !JSValueIsUndefined(ctx, argv[10])) {
+        if (argc > 10 && JSValueIsObject(ctx, argv[10]) && !JSValueIsNull(ctx, argv[10]) &&
+            !JSValueIsUndefined(ctx, argv[10])) {
             JSObjectRef arr = JSValueToObject(ctx, argv[10], nullptr);
             data = GetTypedArrayDataPtr(ctx, arr);
         }
@@ -598,20 +620,19 @@ namespace PrismaUI::WebGL {
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_copyTexSubImage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                     size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_copyTexSubImage3D(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                    const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 9) return JSValueMakeUndefined(ctx);
-        glCopyTexSubImage3D(
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[2], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[5], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[6], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[7], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[8], nullptr)));
+        glCopyTexSubImage3D(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+                            static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
+                            static_cast<GLint>(JSValueToNumber(ctx, argv[2], nullptr)),
+                            static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr)),
+                            static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr)),
+                            static_cast<GLint>(JSValueToNumber(ctx, argv[5], nullptr)),
+                            static_cast<GLint>(JSValueToNumber(ctx, argv[6], nullptr)),
+                            static_cast<GLsizei>(JSValueToNumber(ctx, argv[7], nullptr)),
+                            static_cast<GLsizei>(JSValueToNumber(ctx, argv[8], nullptr)));
         return JSValueMakeUndefined(ctx);
     }
 
@@ -619,8 +640,8 @@ namespace PrismaUI::WebGL {
     // Framebuffer Enhancements (WebGL2)
     // =========================================================================
 
-    JSValueRef GL_drawBuffers(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                               size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_drawBuffers(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                              const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 1) return JSValueMakeUndefined(ctx);
 
@@ -628,8 +649,8 @@ namespace PrismaUI::WebGL {
         if (!arr) return JSValueMakeUndefined(ctx);
 
         JSStringRef lengthKey = JSStringCreateWithUTF8CString("length");
-        GLsizei count = static_cast<GLsizei>(
-            JSValueToNumber(ctx, JSObjectGetProperty(ctx, arr, lengthKey, nullptr), nullptr));
+        GLsizei count =
+            static_cast<GLsizei>(JSValueToNumber(ctx, JSObjectGetProperty(ctx, arr, lengthKey, nullptr), nullptr));
         JSStringRelease(lengthKey);
 
         std::vector<GLenum> bufs(count);
@@ -641,62 +662,59 @@ namespace PrismaUI::WebGL {
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_readBuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                              size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_readBuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                             const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 1) return JSValueMakeUndefined(ctx);
         glReadBuffer(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)));
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_blitFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                   size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_blitFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                  const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 10) return JSValueMakeUndefined(ctx);
-        glBlitFramebuffer(
-            static_cast<GLint>(JSValueToNumber(ctx, argv[0], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[2], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[5], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[6], nullptr)),
-            static_cast<GLint>(JSValueToNumber(ctx, argv[7], nullptr)),
-            static_cast<GLbitfield>(JSValueToNumber(ctx, argv[8], nullptr)),
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[9], nullptr)));
+        glBlitFramebuffer(static_cast<GLint>(JSValueToNumber(ctx, argv[0], nullptr)),
+                          static_cast<GLint>(JSValueToNumber(ctx, argv[1], nullptr)),
+                          static_cast<GLint>(JSValueToNumber(ctx, argv[2], nullptr)),
+                          static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr)),
+                          static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr)),
+                          static_cast<GLint>(JSValueToNumber(ctx, argv[5], nullptr)),
+                          static_cast<GLint>(JSValueToNumber(ctx, argv[6], nullptr)),
+                          static_cast<GLint>(JSValueToNumber(ctx, argv[7], nullptr)),
+                          static_cast<GLbitfield>(JSValueToNumber(ctx, argv[8], nullptr)),
+                          static_cast<GLenum>(JSValueToNumber(ctx, argv[9], nullptr)));
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_framebufferTextureLayer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                           size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_framebufferTextureLayer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                          const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 5) return JSValueMakeUndefined(ctx);
         GLenum target = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
         GLenum attachment = static_cast<GLenum>(JSValueToNumber(ctx, argv[1], nullptr));
         GLuint texture = 0;
-        if (!JSValueIsNull(ctx, argv[2]) && !JSValueIsUndefined(ctx, argv[2]))
-            texture = GetGLId(ctx, argv[2]);
+        if (!JSValueIsNull(ctx, argv[2]) && !JSValueIsUndefined(ctx, argv[2])) texture = GetGLId(ctx, argv[2]);
         GLint level = static_cast<GLint>(JSValueToNumber(ctx, argv[3], nullptr));
         GLint layer = static_cast<GLint>(JSValueToNumber(ctx, argv[4], nullptr));
         glFramebufferTextureLayer(target, attachment, texture, level, layer);
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_renderbufferStorageMultisample(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                                  size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_renderbufferStorageMultisample(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                                 const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 5) return JSValueMakeUndefined(ctx);
-        glRenderbufferStorageMultisample(
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[1], nullptr)),
-            static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr)),
-            static_cast<GLsizei>(JSValueToNumber(ctx, argv[4], nullptr)));
+        glRenderbufferStorageMultisample(static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr)),
+                                         static_cast<GLsizei>(JSValueToNumber(ctx, argv[1], nullptr)),
+                                         static_cast<GLenum>(JSValueToNumber(ctx, argv[2], nullptr)),
+                                         static_cast<GLsizei>(JSValueToNumber(ctx, argv[3], nullptr)),
+                                         static_cast<GLsizei>(JSValueToNumber(ctx, argv[4], nullptr)));
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_invalidateFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                         size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_invalidateFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                        const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 2) return JSValueMakeUndefined(ctx);
         GLenum target = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
@@ -705,8 +723,8 @@ namespace PrismaUI::WebGL {
         if (!arr) return JSValueMakeUndefined(ctx);
 
         JSStringRef lengthKey = JSStringCreateWithUTF8CString("length");
-        GLsizei count = static_cast<GLsizei>(
-            JSValueToNumber(ctx, JSObjectGetProperty(ctx, arr, lengthKey, nullptr), nullptr));
+        GLsizei count =
+            static_cast<GLsizei>(JSValueToNumber(ctx, JSObjectGetProperty(ctx, arr, lengthKey, nullptr), nullptr));
         JSStringRelease(lengthKey);
 
         std::vector<GLenum> attachments(count);
@@ -718,8 +736,8 @@ namespace PrismaUI::WebGL {
         return JSValueMakeUndefined(ctx);
     }
 
-    JSValueRef GL_invalidateSubFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject,
-                                            size_t argc, const JSValueRef argv[], JSValueRef*) {
+    JSValueRef GL_invalidateSubFramebuffer(JSContextRef ctx, JSObjectRef, JSObjectRef thisObject, size_t argc,
+                                           const JSValueRef argv[], JSValueRef*) {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized || argc < 6) return JSValueMakeUndefined(ctx);
         GLenum target = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
@@ -728,8 +746,8 @@ namespace PrismaUI::WebGL {
         if (!arr) return JSValueMakeUndefined(ctx);
 
         JSStringRef lengthKey = JSStringCreateWithUTF8CString("length");
-        GLsizei count = static_cast<GLsizei>(
-            JSValueToNumber(ctx, JSObjectGetProperty(ctx, arr, lengthKey, nullptr), nullptr));
+        GLsizei count =
+            static_cast<GLsizei>(JSValueToNumber(ctx, JSObjectGetProperty(ctx, arr, lengthKey, nullptr), nullptr));
         JSStringRelease(lengthKey);
 
         std::vector<GLenum> attachments(count);

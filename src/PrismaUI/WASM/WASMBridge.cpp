@@ -1,9 +1,4 @@
 #include "WASMBridge.h"
-#include "WASMBridgeImports.h"
-#include "WASMBridgeObjects.h"
-#include "WASMRuntime.h"
-
-#include "PrismaUI/Core.h"
 
 #include <JavaScriptCore/JavaScript.h>
 #include <wasm_export.h>
@@ -14,10 +9,15 @@
 #include <string>
 #include <vector>
 
+#include "PrismaUI/Core.h"
+#include "WASMBridgeImports.h"
+#include "WASMBridgeObjects.h"
+#include "WASMRuntime.h"
+
 #ifdef _WIN32
-#include <Windows.h>
-#include <DbgHelp.h>
-#pragma comment(lib, "DbgHelp.lib")
+    #include <DbgHelp.h>
+    #include <Windows.h>
+    #pragma comment(lib, "DbgHelp.lib")
 #endif
 
 namespace PrismaUI::WASM {
@@ -51,12 +51,12 @@ namespace PrismaUI::WASM {
         logger::error("[WASM]     RAX=0x{:016x}  RBX=0x{:016x}", context->Rax, context->Rbx);
         logger::error("[WASM]     RCX=0x{:016x}  RDX=0x{:016x}", context->Rcx, context->Rdx);
         logger::error("[WASM]     RSI=0x{:016x}  RDI=0x{:016x}", context->Rsi, context->Rdi);
-        logger::error("[WASM]     R8 =0x{:016x}  R9 =0x{:016x}", context->R8,  context->R9);
+        logger::error("[WASM]     R8 =0x{:016x}  R9 =0x{:016x}", context->R8, context->R9);
         logger::error("[WASM]     R10=0x{:016x}  R11=0x{:016x}", context->R10, context->R11);
         logger::error("[WASM]     R12=0x{:016x}  R13=0x{:016x}", context->R12, context->R13);
         logger::error("[WASM]     R14=0x{:016x}  R15=0x{:016x}", context->R14, context->R15);
-        logger::error("[WASM]     RIP=0x{:016x}  RSP=0x{:016x}  RBP=0x{:016x}",
-                      context->Rip, context->Rsp, context->Rbp);
+        logger::error("[WASM]     RIP=0x{:016x}  RSP=0x{:016x}  RBP=0x{:016x}", context->Rip, context->Rsp,
+                      context->Rbp);
 
         // Walk the stack
         HANDLE process = GetCurrentProcess();
@@ -91,9 +91,8 @@ namespace PrismaUI::WASM {
 
         logger::error("[WASM]   Stack trace:");
         for (int i = 0; i < 32; i++) {
-            if (!StackWalk64(IMAGE_FILE_MACHINE_AMD64, process, thread,
-                             &frame, context, NULL,
-                             SymFunctionTableAccess64, SymGetModuleBase64, NULL)) {
+            if (!StackWalk64(IMAGE_FILE_MACHINE_AMD64, process, thread, &frame, context, NULL, SymFunctionTableAccess64,
+                             SymGetModuleBase64, NULL)) {
                 break;
             }
             if (frame.AddrPC.Offset == 0) break;
@@ -105,8 +104,7 @@ namespace PrismaUI::WASM {
 
             DWORD64 displacement = 0;
             if (SymFromAddr(process, frame.AddrPC.Offset, &displacement, symbol)) {
-                logger::error("[WASM]     [{}] {}+0x{:x}",
-                              i, symbol->Name, displacement);
+                logger::error("[WASM]     [{}] {}+0x{:x}", i, symbol->Name, displacement);
             } else {
                 logger::error("[WASM]     [{}] 0x{:016x}", i, frame.AddrPC.Offset);
             }
@@ -119,8 +117,7 @@ namespace PrismaUI::WASM {
     // Thin SEH wrapper — no C++ destructors allowed in this function.
     // After catching an exception, set WAMR's internal exception string so the
     // module instance is in a consistent error state.
-    bool SEHCallWasm(wasm_exec_env_t execEnv, wasm_function_inst_t func,
-                     uint32_t argc, uint32_t* argv) {
+    bool SEHCallWasm(wasm_exec_env_t execEnv, wasm_function_inst_t func, uint32_t argc, uint32_t* argv) {
         // Clear any leftover exception from a previous failed call so the
         // interpreter doesn't refuse to run.
         wasm_module_inst_t mi = wasm_runtime_get_module_inst(execEnv);
@@ -130,46 +127,34 @@ namespace PrismaUI::WASM {
 
         __try {
             return wasm_runtime_call_wasm(execEnv, func, argc, argv);
-        }
-        __except (LogSEHException(GetExceptionInformation())) {
-            // The exception handler already logged everything.
+        } __except (LogSEHException(GetExceptionInformation())) {
             logger::error("[WASM] SEH handler: returning false to caller");
-            // Try to set an exception on the module and dump the WASM call
-            // stack.  Guard this section — exec_env or module_inst may be
-            // corrupted after the crash.
+
             __try {
                 wasm_module_inst_t mi2 = wasm_runtime_get_module_inst(execEnv);
                 if (mi2) {
-                    wasm_runtime_set_exception(mi2,
-                        "access violation caught by SEH guard");
+                    wasm_runtime_set_exception(mi2, "access violation caught by SEH guard");
                 }
-                // Dump WASM-level call stack (requires WAMR_BUILD_DUMP_CALL_STACK=1).
-                // Use malloc/free instead of std::vector — SEH blocks cannot
-                // contain C++ objects with destructors.
+
                 uint32_t csSize = wasm_runtime_get_call_stack_buf_size(execEnv);
                 if (csSize > 0 && csSize < 64 * 1024) {
                     char* csBuf = static_cast<char*>(malloc(csSize));
                     if (csBuf) {
-                        uint32_t written = wasm_runtime_dump_call_stack_to_buf(
-                            execEnv, csBuf, csSize);
+                        uint32_t written = wasm_runtime_dump_call_stack_to_buf(execEnv, csBuf, csSize);
                         if (written > 0) {
-                            logger::error("[WASM] WASM call stack at crash:\n{}",
-                                          csBuf);
+                            logger::error("[WASM] WASM call stack at crash:\n{}", csBuf);
                         }
                         free(csBuf);
                     }
                 }
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER) {
+            } __except (EXCEPTION_EXECUTE_HANDLER) {
                 logger::error("[WASM] Could not dump WASM call stack (exec_env corrupted)");
             }
             return false;
         }
     }
 #else
-    // Non-Windows: no SEH, call directly
-    bool SEHCallWasm(wasm_exec_env_t execEnv, wasm_function_inst_t func,
-                     uint32_t argc, uint32_t* argv) {
+    bool SEHCallWasm(wasm_exec_env_t execEnv, wasm_function_inst_t func, uint32_t argc, uint32_t* argv) {
         return wasm_runtime_call_wasm(execEnv, func, argc, argv);
     }
 #endif
@@ -189,18 +174,18 @@ namespace PrismaUI::WASM {
         wasm_module_t wasmModule = nullptr;  // Non-owning ref for export queries
         uint64_t viewId = 0;
         ImportContext importCtx;  // Trampoline data kept alive for imported function calls
-        bool poisoned = false;   // Set after an SEH crash — shared across all exports
+        bool poisoned = false;    // Set after an SEH crash — shared across all exports
         // prevent the Module JSObject from being GC'd while this instance exists.
         // The WAMR module inst holds raw pointers into module data (function bytecode,
         // type info); if the Module finalizer runs wasm_runtime_unload() while the
-        // instance is still alive, those pointers become dangling → use-after-free.
+        // instance is still alive, those pointers become dangling then use-after-free.
         JSContextRef moduleCtx = nullptr;
-        JSObjectRef  moduleRef = nullptr;   // JSValueProtect'd (null until set)
+        JSObjectRef moduleRef = nullptr;
     };
 
     struct ExportFuncContext {
         wasm_exec_env_t execEnv;
-        wasm_module_inst_t moduleInst;  // Needed for type queries
+        wasm_module_inst_t moduleInst;
         wasm_function_inst_t wasmFunc;
         uint32_t paramCount;
         uint32_t resultCount;
@@ -210,9 +195,9 @@ namespace PrismaUI::WASM {
         // export function exists — the raw pointers above reference
         // resources owned by the instance.
         JSContextRef ctx;
-        JSObjectRef instanceRef;  // JSValueProtect'd
+        JSObjectRef instanceRef;
         bool* instancePoisonFlag = nullptr;  // Points to WASMInstanceData::poisoned
-        std::string funcName;     // For diagnostics
+        std::string funcName;
     };
 
     // =========================================================================
@@ -263,10 +248,8 @@ namespace PrismaUI::WASM {
             JSClassDefinition def{};
             def.className = "WebAssembly.ExportedFunction";
             def.finalize = ExportFuncFinalize;
-            def.callAsFunction = [](JSContextRef ctx, JSObjectRef function,
-                                    JSObjectRef /*thisObject*/, size_t argc,
-                                    const JSValueRef argv[],
-                                    JSValueRef* exception) -> JSValueRef {
+            def.callAsFunction = [](JSContextRef ctx, JSObjectRef function, JSObjectRef /*thisObject*/, size_t argc,
+                                    const JSValueRef argv[], JSValueRef* exception) -> JSValueRef {
                 auto* efc = static_cast<ExportFuncContext*>(JSObjectGetPrivate(function));
                 if (!efc || !efc->execEnv || !efc->wasmFunc) {
                     return JSValueMakeUndefined(ctx);
@@ -276,8 +259,8 @@ namespace PrismaUI::WASM {
                 // state.  Refuse further calls to prevent a cascade of
                 // repeated access violations (e.g. requestAnimationFrame).
                 if (efc->instancePoisonFlag && *efc->instancePoisonFlag) {
-                    JSStringRef errStr = JSStringCreateWithUTF8CString(
-                        "WASM instance terminated due to previous fatal error");
+                    JSStringRef errStr =
+                        JSStringCreateWithUTF8CString("WASM instance terminated due to previous fatal error");
                     JSValueRef errVal = JSValueMakeString(ctx, errStr);
                     JSStringRelease(errStr);
                     *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -286,7 +269,6 @@ namespace PrismaUI::WASM {
 
                 // Build argv for WAMR: each WASM param is a uint32_t slot
                 // (i64/f64 take 2 slots in the uint32_t array)
-                // Allocate generous space: 2 slots per param + 2 for result
                 uint32_t maxSlots = (efc->paramCount + efc->resultCount) * 2;
                 if (maxSlots < 2) maxSlots = 2;
 
@@ -302,8 +284,7 @@ namespace PrismaUI::WASM {
                 // Convert JS args to WASM args based on type info
                 uint32_t slotIdx = 0;
                 for (uint32_t i = 0; i < efc->paramCount && i < static_cast<uint32_t>(argc); i++) {
-                    wasm_valkind_t paramType = (i < efc->paramTypes.size()) ?
-                        efc->paramTypes[i] : WASM_I32;
+                    wasm_valkind_t paramType = (i < efc->paramTypes.size()) ? efc->paramTypes[i] : WASM_I32;
 
                     if (paramType == WASM_F64) {
                         double val = JSValueToNumber(ctx, argv[i], nullptr);
@@ -319,31 +300,26 @@ namespace PrismaUI::WASM {
                         slotIdx += 2;  // i64 takes 2 uint32_t slots
                     } else {
                         // i32 or other
-                        wasmArgv[slotIdx] = static_cast<uint32_t>(
-                            static_cast<int32_t>(JSValueToNumber(ctx, argv[i], nullptr)));
+                        wasmArgv[slotIdx] =
+                            static_cast<uint32_t>(static_cast<int32_t>(JSValueToNumber(ctx, argv[i], nullptr)));
                         slotIdx += 1;
                     }
                 }
 
-                if (!SEHCallWasm(efc->execEnv, efc->wasmFunc,
-                                 slotIdx, wasmArgv)) {
-                    // Guard: module_inst may be invalid after SEH exception
+                if (!SEHCallWasm(efc->execEnv, efc->wasmFunc, slotIdx, wasmArgv)) {
                     const char* exceptionMsg = nullptr;
                     wasm_module_inst_t mi = wasm_runtime_get_module_inst(efc->execEnv);
                     if (mi) {
                         exceptionMsg = wasm_runtime_get_exception(mi);
                     }
                     std::string errStr = exceptionMsg ? exceptionMsg : "WASM runtime error (possible SEH crash)";
-                    logger::error("[WASM] Export '{}' failed: {}",
-                                  efc->funcName, errStr);
+                    logger::error("[WASM] Export '{}' failed: {}", efc->funcName, errStr);
 
                     // If the error is from an SEH catch (access violation),
                     // poison the ENTIRE instance so no export can be called.
-                    if (errStr.find("access violation") != std::string::npos
-                        || errStr.find("SEH") != std::string::npos
-                        || !exceptionMsg) {
-                        if (efc->instancePoisonFlag)
-                            *efc->instancePoisonFlag = true;
+                    if (errStr.find("access violation") != std::string::npos ||
+                        errStr.find("SEH") != std::string::npos || !exceptionMsg) {
+                        if (efc->instancePoisonFlag) *efc->instancePoisonFlag = true;
                         logger::error("[WASM] Instance poisoned — further calls will be rejected");
                     }
 
@@ -359,8 +335,7 @@ namespace PrismaUI::WASM {
                     return JSValueMakeUndefined(ctx);
                 }
 
-                wasm_valkind_t resultType = efc->resultTypes.empty() ?
-                    WASM_I32 : efc->resultTypes[0];
+                wasm_valkind_t resultType = efc->resultTypes.empty() ? WASM_I32 : efc->resultTypes[0];
 
                 if (resultType == WASM_F64) {
                     double result;
@@ -376,8 +351,7 @@ namespace PrismaUI::WASM {
                     return JSValueMakeNumber(ctx, static_cast<double>(result));
                 } else {
                     // i32
-                    return JSValueMakeNumber(ctx, static_cast<double>(
-                        static_cast<int32_t>(wasmArgv[0])));
+                    return JSValueMakeNumber(ctx, static_cast<double>(static_cast<int32_t>(wasmArgv[0])));
                 }
             };
             return JSClassCreate(&def);
@@ -392,13 +366,12 @@ namespace PrismaUI::WASM {
         if (data) {
             // Remove from view's tracking list
             {
-                // wasmInstances is only mutated from the ultralight thread (GC finalize
-                // here, and Destroy runs inline via IsWorkerThread guard), so shared_lock
-                // on viewsMutex is sufficient — we only need read access to the map.
+                // wasmInstances is only mutated from the ultralight thread
+                // (GC finalize here, and Destroy runs in IsWorkerThread guard)
                 std::shared_lock lock(Core::viewsMutex);
                 auto it = Core::views.find(data->viewId);
-                if (it != Core::views.end() && it->second->wasmInstances) {
-                    auto& instances = *it->second->wasmInstances;
+                if (it != Core::views.end()) {
+                    auto& instances = it->second->wasmInstances;
                     for (auto instIt = instances.begin(); instIt != instances.end(); ++instIt) {
                         if (instIt->moduleInst == data->moduleInst) {
                             instances.erase(instIt);
@@ -411,7 +384,7 @@ namespace PrismaUI::WASM {
             // Unregister import natives from WAMR's global lookup table, then
             // clean up import trampolines (unprotect JS refs, free trampoline data).
             // Both must be deferred to here because WAMR reads both the
-            // NativeSymbol data (signature pointers) and trampoline attachments
+            // NativeSymbol data and trampoline attachments
             // at call time throughout the instance's lifetime.
             UnregisterImportNatives(data->importCtx);
             CleanupImportTrampolines(data->importCtx);
@@ -490,8 +463,7 @@ namespace PrismaUI::WASM {
         return JSObjectCallAsFunction(ctx, resolver, nullptr, 1, &value, nullptr);
     }
 
-    static JSValueRef RejectPromise(JSContextRef ctx, const std::string& errorMsg,
-                                     const char* errorType = "Error") {
+    static JSValueRef RejectPromise(JSContextRef ctx, const std::string& errorMsg, const char* errorType = "Error") {
         // Create error object of the appropriate type
         JSStringRef msgStr = JSStringCreateWithUTF8CString(errorMsg.c_str());
         JSValueRef msgVal = JSValueMakeString(ctx, msgStr);
@@ -574,8 +546,7 @@ namespace PrismaUI::WASM {
         }
     }
 
-    static JSObjectRef BuildExportsObject(JSContextRef ctx, WASMInstanceData* instData,
-                                           JSObjectRef instanceObj) {
+    static JSObjectRef BuildExportsObject(JSContextRef ctx, WASMInstanceData* instData, JSObjectRef instanceObj) {
         JSObjectRef exportsObj = JSObjectMake(ctx, nullptr, nullptr);
 
         int32_t exportCount = wasm_runtime_get_export_count(instData->wasmModule);
@@ -586,8 +557,7 @@ namespace PrismaUI::WASM {
             if (!exportInfo.name) continue;
 
             if (exportInfo.kind == WASM_IMPORT_EXPORT_KIND_FUNC) {
-                wasm_function_inst_t func = wasm_runtime_lookup_function(
-                    instData->moduleInst, exportInfo.name);
+                wasm_function_inst_t func = wasm_runtime_lookup_function(instData->moduleInst, exportInfo.name);
                 if (!func) continue;
 
                 uint32_t paramCount = wasm_func_get_param_count(func, instData->moduleInst);
@@ -603,37 +573,38 @@ namespace PrismaUI::WASM {
                     wasm_func_get_result_types(func, instData->moduleInst, resultTypes.data());
                 }
 
-                auto* efc = new ExportFuncContext{
-                    instData->execEnv, instData->moduleInst, func,
-                    paramCount, resultCount,
-                    std::move(paramTypes), std::move(resultTypes),
-                    ctx, instanceObj, &instData->poisoned,
-                    exportInfo.name ? exportInfo.name : ""};
+                auto* efc = new ExportFuncContext{instData->execEnv,
+                                                  instData->moduleInst,
+                                                  func,
+                                                  paramCount,
+                                                  resultCount,
+                                                  std::move(paramTypes),
+                                                  std::move(resultTypes),
+                                                  ctx,
+                                                  instanceObj,
+                                                  &instData->poisoned,
+                                                  exportInfo.name ? exportInfo.name : ""};
                 JSValueProtect(ctx, instanceObj);
 
                 JSObjectRef funcObj = JSObjectMake(ctx, GetExportFuncClass(), efc);
                 SetFunctionPrototype(ctx, funcObj);
                 JSStringRef propName = JSStringCreateWithUTF8CString(exportInfo.name);
                 JSObjectSetProperty(ctx, exportsObj, propName, funcObj,
-                                    kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete,
-                                    nullptr);
+                                    kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete, nullptr);
                 JSStringRelease(propName);
             }
             // Phase 2: Handle memory exports
             else if (exportInfo.kind == WASM_IMPORT_EXPORT_KIND_MEMORY) {
-                wasm_memory_inst_t memInst = wasm_runtime_lookup_memory(
-                    instData->moduleInst, exportInfo.name);
+                wasm_memory_inst_t memInst = wasm_runtime_lookup_memory(instData->moduleInst, exportInfo.name);
                 if (!memInst) {
                     // Try default memory (index 0) as fallback
                     memInst = wasm_runtime_get_default_memory(instData->moduleInst);
                 }
                 if (memInst) {
-                    JSObjectRef memObj = WrapMemoryExport(ctx, instData->moduleInst, memInst,
-                                                          instanceObj);
+                    JSObjectRef memObj = WrapMemoryExport(ctx, instData->moduleInst, memInst, instanceObj);
                     JSStringRef propName = JSStringCreateWithUTF8CString(exportInfo.name);
                     JSObjectSetProperty(ctx, exportsObj, propName, memObj,
-                                        kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete,
-                                        nullptr);
+                                        kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete, nullptr);
                     JSStringRelease(propName);
                 }
             }
@@ -641,13 +612,11 @@ namespace PrismaUI::WASM {
             else if (exportInfo.kind == WASM_IMPORT_EXPORT_KIND_TABLE) {
                 wasm_table_inst_t tableInfo{};
                 if (wasm_runtime_get_export_table_inst(instData->moduleInst, exportInfo.name, &tableInfo)) {
-                    JSObjectRef tblObj = WrapTableExport(
-                        ctx, instData->moduleInst, tableInfo, static_cast<uint32_t>(i),
-                        instData->execEnv, instanceObj);
+                    JSObjectRef tblObj = WrapTableExport(ctx, instData->moduleInst, tableInfo, static_cast<uint32_t>(i),
+                                                         instData->execEnv, instanceObj);
                     JSStringRef propName = JSStringCreateWithUTF8CString(exportInfo.name);
                     JSObjectSetProperty(ctx, exportsObj, propName, tblObj,
-                                        kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete,
-                                        nullptr);
+                                        kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete, nullptr);
                     JSStringRelease(propName);
                 }
             }
@@ -658,8 +627,7 @@ namespace PrismaUI::WASM {
                     JSObjectRef globalObj = WrapGlobalExport(ctx, globalInfo, instanceObj);
                     JSStringRef propName = JSStringCreateWithUTF8CString(exportInfo.name);
                     JSObjectSetProperty(ctx, exportsObj, propName, globalObj,
-                                        kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete,
-                                        nullptr);
+                                        kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete, nullptr);
                     JSStringRelease(propName);
                 }
             }
@@ -669,15 +637,13 @@ namespace PrismaUI::WASM {
     }
 
     // =========================================================================
-    // WebAssembly.Module.exports(module) → [{name, kind}]
+    // WebAssembly.Module.exports(module) then [{name, kind}]
     // =========================================================================
 
-    static JSValueRef WASM_ModuleExports(JSContextRef ctx, JSObjectRef /*function*/,
-                                          JSObjectRef /*thisObject*/, size_t argc,
-                                          const JSValueRef argv[], JSValueRef* exception) {
+    static JSValueRef WASM_ModuleExports(JSContextRef ctx, JSObjectRef /*function*/, JSObjectRef /*thisObject*/,
+                                         size_t argc, const JSValueRef argv[], JSValueRef* exception) {
         if (argc < 1 || !JSValueIsObject(ctx, argv[0])) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Module.exports requires a Module argument");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Module.exports requires a Module argument");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -687,8 +653,7 @@ namespace PrismaUI::WASM {
         JSObjectRef moduleObj = JSValueToObject(ctx, argv[0], nullptr);
         auto* modData = static_cast<WASMModuleData*>(JSObjectGetPrivate(moduleObj));
         if (!modData || !modData->wasmModule) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Module.exports: invalid Module object");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Module.exports: invalid Module object");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -698,7 +663,7 @@ namespace PrismaUI::WASM {
         int32_t exportCount = wasm_runtime_get_export_count(modData->wasmModule);
         JSObjectRef resultArray = JSObjectMakeArray(ctx, 0, nullptr, nullptr);
 
-        // [055] Use a separate write index so null-name exports don't create sparse gaps
+        // Use a separate write index so null-name exports don't create sparse gaps
         unsigned writeIdx = 0;
         for (int32_t i = 0; i < exportCount; i++) {
             wasm_export_t exportInfo;
@@ -715,10 +680,18 @@ namespace PrismaUI::WASM {
 
             const char* kindStr = "unknown";
             switch (exportInfo.kind) {
-                case WASM_IMPORT_EXPORT_KIND_FUNC:   kindStr = "function"; break;
-                case WASM_IMPORT_EXPORT_KIND_TABLE:  kindStr = "table"; break;
-                case WASM_IMPORT_EXPORT_KIND_MEMORY: kindStr = "memory"; break;
-                case WASM_IMPORT_EXPORT_KIND_GLOBAL: kindStr = "global"; break;
+                case WASM_IMPORT_EXPORT_KIND_FUNC:
+                    kindStr = "function";
+                    break;
+                case WASM_IMPORT_EXPORT_KIND_TABLE:
+                    kindStr = "table";
+                    break;
+                case WASM_IMPORT_EXPORT_KIND_MEMORY:
+                    kindStr = "memory";
+                    break;
+                case WASM_IMPORT_EXPORT_KIND_GLOBAL:
+                    kindStr = "global";
+                    break;
             }
 
             JSStringRef kindProp = JSStringCreateWithUTF8CString("kind");
@@ -734,15 +707,14 @@ namespace PrismaUI::WASM {
     }
 
     // =========================================================================
-    // WebAssembly.Module.imports(module) → [{module, name, kind}]
+    // WebAssembly.Module.imports(module) then [{module, name, kind}]
     // =========================================================================
 
-    static JSValueRef WASM_ModuleImports(JSContextRef ctx, JSObjectRef /*function*/,
-                                          JSObjectRef /*thisObject*/, size_t argc,
-                                          const JSValueRef argv[], JSValueRef* exception) {
+    static JSValueRef WASM_ModuleImports(JSContextRef ctx, [[maybe_unused]] JSObjectRef function,
+                                         [[maybe_unused]] JSObjectRef thisObject, size_t argc, const JSValueRef argv[],
+                                         JSValueRef* exception) {
         if (argc < 1 || !JSValueIsObject(ctx, argv[0])) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Module.imports requires a Module argument");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Module.imports requires a Module argument");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -752,8 +724,7 @@ namespace PrismaUI::WASM {
         JSObjectRef moduleObj = JSValueToObject(ctx, argv[0], nullptr);
         auto* modData = static_cast<WASMModuleData*>(JSObjectGetPrivate(moduleObj));
         if (!modData || !modData->wasmModule) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Module.imports: invalid Module object");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Module.imports: invalid Module object");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -772,16 +743,14 @@ namespace PrismaUI::WASM {
 
             // module
             JSStringRef moduleProp = JSStringCreateWithUTF8CString("module");
-            JSStringRef moduleVal = JSStringCreateWithUTF8CString(
-                importInfo.module_name ? importInfo.module_name : "");
+            JSStringRef moduleVal = JSStringCreateWithUTF8CString(importInfo.module_name ? importInfo.module_name : "");
             JSObjectSetProperty(ctx, entry, moduleProp, JSValueMakeString(ctx, moduleVal), 0, nullptr);
             JSStringRelease(moduleVal);
             JSStringRelease(moduleProp);
 
             // name
             JSStringRef nameProp = JSStringCreateWithUTF8CString("name");
-            JSStringRef nameVal = JSStringCreateWithUTF8CString(
-                importInfo.name ? importInfo.name : "");
+            JSStringRef nameVal = JSStringCreateWithUTF8CString(importInfo.name ? importInfo.name : "");
             JSObjectSetProperty(ctx, entry, nameProp, JSValueMakeString(ctx, nameVal), 0, nullptr);
             JSStringRelease(nameVal);
             JSStringRelease(nameProp);
@@ -789,10 +758,18 @@ namespace PrismaUI::WASM {
             // kind
             const char* kindStr = "unknown";
             switch (importInfo.kind) {
-                case WASM_IMPORT_EXPORT_KIND_FUNC:   kindStr = "function"; break;
-                case WASM_IMPORT_EXPORT_KIND_TABLE:  kindStr = "table"; break;
-                case WASM_IMPORT_EXPORT_KIND_MEMORY: kindStr = "memory"; break;
-                case WASM_IMPORT_EXPORT_KIND_GLOBAL: kindStr = "global"; break;
+                case WASM_IMPORT_EXPORT_KIND_FUNC:
+                    kindStr = "function";
+                    break;
+                case WASM_IMPORT_EXPORT_KIND_TABLE:
+                    kindStr = "table";
+                    break;
+                case WASM_IMPORT_EXPORT_KIND_MEMORY:
+                    kindStr = "memory";
+                    break;
+                case WASM_IMPORT_EXPORT_KIND_GLOBAL:
+                    kindStr = "global";
+                    break;
             }
 
             JSStringRef kindProp = JSStringCreateWithUTF8CString("kind");
@@ -808,12 +785,12 @@ namespace PrismaUI::WASM {
     }
 
     // =========================================================================
-    // WebAssembly.validate(bytes) → boolean
+    // WebAssembly.validate(bytes) then boolean
     // =========================================================================
 
-    static JSValueRef WASM_Validate(JSContextRef ctx, JSObjectRef /*function*/,
-                                     JSObjectRef /*thisObject*/, size_t argc,
-                                     const JSValueRef argv[], JSValueRef* /*exc*/) {
+    static JSValueRef WASM_Validate(JSContextRef ctx, [[maybe_unused]] JSObjectRef function,
+                                    [[maybe_unused]] JSObjectRef thisObject, size_t argc, const JSValueRef argv[],
+                                    JSValueRef* [[maybe_unused]] exc) {
         if (argc < 1) return JSValueMakeBoolean(ctx, false);
 
         auto [bytes, len] = ExtractBytes(ctx, argv[0]);
@@ -824,9 +801,8 @@ namespace PrismaUI::WASM {
         // WAMR has no standalone validate API; attempt load + unload
         std::vector<uint8_t> bytesCopy(bytes, bytes + len);
         char errorBuf[128] = {};
-        wasm_module_t mod = wasm_runtime_load(
-            bytesCopy.data(), static_cast<uint32_t>(bytesCopy.size()),
-            errorBuf, sizeof(errorBuf));
+        wasm_module_t mod =
+            wasm_runtime_load(bytesCopy.data(), static_cast<uint32_t>(bytesCopy.size()), errorBuf, sizeof(errorBuf));
         bool valid = (mod != nullptr);
         if (valid) {
             wasm_runtime_unload(mod);
@@ -838,12 +814,10 @@ namespace PrismaUI::WASM {
     // WebAssembly.Module(bytes) constructor
     // =========================================================================
 
-    static JSObjectRef WASM_ModuleConstructor(JSContextRef ctx, JSObjectRef /*constructor*/,
-                                               size_t argc, const JSValueRef argv[],
-                                               JSValueRef* exception) {
+    static JSObjectRef WASM_ModuleConstructor(JSContextRef ctx, [[maybe_unused]] JSObjectRef constructor, size_t argc,
+                                              const JSValueRef argv[], JSValueRef* exception) {
         if (argc < 1) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Module requires a BufferSource argument");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Module requires a BufferSource argument");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -852,8 +826,7 @@ namespace PrismaUI::WASM {
 
         auto [bytes, len] = ExtractBytes(ctx, argv[0]);
         if (!bytes || len == 0) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Module: invalid or empty buffer source");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Module: invalid or empty buffer source");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -861,8 +834,7 @@ namespace PrismaUI::WASM {
         }
 
         if (!EnsureRuntimeInitialized()) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Module: failed to initialize WASM runtime");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Module: failed to initialize WASM runtime");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -876,8 +848,7 @@ namespace PrismaUI::WASM {
 
         char errorBuf[128] = {};
         modData->wasmModule = wasm_runtime_load(
-            modData->bytecode.data(), static_cast<uint32_t>(modData->bytecode.size()),
-            errorBuf, sizeof(errorBuf));
+            modData->bytecode.data(), static_cast<uint32_t>(modData->bytecode.size()), errorBuf, sizeof(errorBuf));
 
         if (!modData->wasmModule) {
             std::string errMsg = "WebAssembly.Module: compilation failed: ";
@@ -903,12 +874,10 @@ namespace PrismaUI::WASM {
     // WebAssembly.Instance(module [, imports]) constructor
     // =========================================================================
 
-    static JSObjectRef WASM_InstanceConstructor(JSContextRef ctx, JSObjectRef constructor,
-                                                 size_t argc, const JSValueRef argv[],
-                                                 JSValueRef* exception) {
+    static JSObjectRef WASM_InstanceConstructor(JSContextRef ctx, JSObjectRef constructor, size_t argc,
+                                                const JSValueRef argv[], JSValueRef* exception) {
         if (argc < 1 || !JSValueIsObject(ctx, argv[0])) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Instance requires a Module argument");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Instance requires a Module argument");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -918,8 +887,7 @@ namespace PrismaUI::WASM {
         JSObjectRef moduleObj = JSValueToObject(ctx, argv[0], nullptr);
         auto* modData = static_cast<WASMModuleData*>(JSObjectGetPrivate(moduleObj));
         if (!modData || !modData->wasmModule) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Instance: invalid Module object");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Instance: invalid Module object");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -936,31 +904,30 @@ namespace PrismaUI::WASM {
             return JSObjectMake(ctx, nullptr, nullptr);
         }
 
-        // IMPORTANT: The module was loaded (wasm_runtime_load) before any JS import
+        // If the module was loaded (wasm_runtime_load) before any JS import
         // functions were registered, so all func_ptr_linked fields are NULL. Now that
         // ResolveImports has registered our natives in WAMR's global symbol table,
-        // we must re-resolve the module's imports so they pick up the newly-registered
-        // native function pointers. Without this, instantiation copies NULL pointers
+        // must re-resolve the module's imports so they pick up the newly-registered
+        // native function pointers otherwise instantiation copies NULL pointers
         // and calls to imported functions fail with "unlinked import function".
         if (!importCtx.modules.empty()) {
             bool resolved = wasm_runtime_resolve_symbols(modData->wasmModule);
-            logger::info("[WASM] wasm_runtime_resolve_symbols returned: {}",
-                         resolved ? "true" : "false");
+            logger::info("[WASM] wasm_runtime_resolve_symbols returned: {}", resolved ? "true" : "false");
         }
 
         constexpr uint32_t kStackSize = 512 * 1024;  // 512KB WASM operand stack
         constexpr uint32_t kHeapSize = 0;            // Emscripten modules manage their own heap
 
         char errorBuf[128] = {};
-        wasm_module_inst_t moduleInst = wasm_runtime_instantiate(
-            modData->wasmModule, kStackSize, kHeapSize, errorBuf, sizeof(errorBuf));
+        wasm_module_inst_t moduleInst =
+            wasm_runtime_instantiate(modData->wasmModule, kStackSize, kHeapSize, errorBuf, sizeof(errorBuf));
 
         // NOTE: Do NOT call UnregisterImportNatives() here. Although
         // func_ptr_linked is already baked into the module, WAMR also stores
         // the NativeSymbol::signature pointer on WASMFunctionImport::signature
         // and reads it at CALL TIME (in wasm_runtime_invoke_native_raw) to
         // check for pointer/string annotations. Clearing modules would destroy
-        // signatureStorage and create dangling signature pointers → crash.
+        // signatureStorage and create dangling signature pointers causing ctd.
         // Unregistration is deferred to the instance finalizer.
 
         if (!moduleInst) {
@@ -982,8 +949,8 @@ namespace PrismaUI::WASM {
         if (!execEnv) {
             CleanupImports(importCtx);
             wasm_runtime_deinstantiate(moduleInst);
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Instance: failed to create execution environment");
+            JSStringRef errStr =
+                JSStringCreateWithUTF8CString("WebAssembly.Instance: failed to create execution environment");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -1007,8 +974,7 @@ namespace PrismaUI::WASM {
             }
         }
 
-        auto* instData = new WASMInstanceData{moduleInst, execEnv, modData->wasmModule, viewId,
-                                              std::move(importCtx)};
+        auto* instData = new WASMInstanceData{moduleInst, execEnv, modData->wasmModule, viewId, std::move(importCtx)};
 
         // Prevent the Module JSObject from being garbage-collected while this
         // instance is alive. WAMR's module instance holds raw pointers into the
@@ -1024,11 +990,7 @@ namespace PrismaUI::WASM {
             std::shared_lock lock(Core::viewsMutex);
             auto it = Core::views.find(viewId);
             if (it != Core::views.end()) {
-                if (!it->second->wasmInstances) {
-                    it->second->wasmInstances = std::make_unique<std::vector<WASMInstanceHandle>>();
-                }
-                it->second->wasmInstances->push_back(
-                    WASMInstanceHandle{modData->wasmModule, moduleInst, execEnv});
+                it->second->wasmInstances.push_back(WASMInstanceHandle{modData->wasmModule, moduleInst, execEnv});
             }
         }
 
@@ -1065,15 +1027,14 @@ namespace PrismaUI::WASM {
     }
 
     // =========================================================================
-    // WebAssembly.compile(bytes) → Promise<Module>
+    // WebAssembly.compile(bytes) Promise<Module>
     // =========================================================================
 
-    static JSValueRef WASM_Compile(JSContextRef ctx, JSObjectRef /*function*/,
-                                    JSObjectRef /*thisObject*/, size_t argc,
-                                    const JSValueRef argv[], JSValueRef* exception) {
+    static JSValueRef WASM_Compile(JSContextRef ctx, [[maybe_unused]] JSObjectRef function,
+                                   [[maybe_unused]] JSObjectRef thisObject, size_t argc, const JSValueRef argv[],
+                                   JSValueRef* exception) {
         if (argc < 1) {
-            return RejectPromise(ctx, "WebAssembly.compile requires a BufferSource argument",
-                                 "CompileError");
+            return RejectPromise(ctx, "WebAssembly.compile requires a BufferSource argument", "CompileError");
         }
 
         // Synchronously compile, then wrap in resolved Promise
@@ -1087,16 +1048,15 @@ namespace PrismaUI::WASM {
 
     // =========================================================================
     // WebAssembly.instantiate(bufferOrModule [, imports])
-    //   - If first arg is BufferSource: → Promise<{module, instance}>
-    //   - If first arg is Module: → Promise<Instance>
+    //   - If first arg is BufferSource: then Promise<{module, instance}>
+    //   - If first arg is Module: then Promise<Instance>
     // =========================================================================
 
-    static JSValueRef WASM_Instantiate(JSContextRef ctx, JSObjectRef /*function*/,
-                                        JSObjectRef /*thisObject*/, size_t argc,
-                                        const JSValueRef argv[], JSValueRef* exception) {
+    static JSValueRef WASM_Instantiate(JSContextRef ctx, [[maybe_unused]] JSObjectRef function,
+                                       [[maybe_unused]] JSObjectRef thisObject, size_t argc, const JSValueRef argv[],
+                                       JSValueRef* exception) {
         if (argc < 1) {
-            return RejectPromise(ctx, "WebAssembly.instantiate requires at least one argument",
-                                 "CompileError");
+            return RejectPromise(ctx, "WebAssembly.instantiate requires at least one argument", "CompileError");
         }
 
         // Check if first arg is a Module (has our Module class private data)
@@ -1112,7 +1072,7 @@ namespace PrismaUI::WASM {
         JSObjectRef instCtor = GetInstanceCtor(ctx);
 
         if (isModule) {
-            // instantiate(module, imports) → Promise<Instance>
+            // instantiate(module, imports) then Promise<Instance>
             JSObjectRef instanceObj = WASM_InstanceConstructor(ctx, instCtor, argc, argv, exception);
             if (exception && *exception) {
                 return ExceptionToRejectedPromise(ctx, exception);
@@ -1120,7 +1080,7 @@ namespace PrismaUI::WASM {
             return ResolvePromise(ctx, instanceObj);
         }
 
-        // instantiate(bytes, imports) → Promise<{module, instance}>
+        // instantiate(bytes, imports) then Promise<{module, instance}>
         // First compile the module
         JSValueRef compileException = nullptr;
         JSObjectRef moduleObj = WASM_ModuleConstructor(ctx, nullptr, 1, argv, &compileException);
@@ -1146,8 +1106,7 @@ namespace PrismaUI::WASM {
         }
 
         JSValueRef instException = nullptr;
-        JSObjectRef instanceObj = WASM_InstanceConstructor(
-            ctx, instCtor, instArgc, instArgs, &instException);
+        JSObjectRef instanceObj = WASM_InstanceConstructor(ctx, instCtor, instArgc, instArgs, &instException);
         if (instException) {
             return ExceptionToRejectedPromise(ctx, &instException);
         }
@@ -1188,85 +1147,68 @@ namespace PrismaUI::WASM {
         // -- validate --
         JSStringRef validateName = JSStringCreateWithUTF8CString("validate");
         JSObjectRef validateFunc = JSObjectMakeFunctionWithCallback(jsCtx, validateName, WASM_Validate);
-        JSObjectSetProperty(jsCtx, wasmObj, validateName, validateFunc,
-                            kJSPropertyAttributeDontDelete, nullptr);
+        JSObjectSetProperty(jsCtx, wasmObj, validateName, validateFunc, kJSPropertyAttributeDontDelete, nullptr);
         JSStringRelease(validateName);
 
         // -- compile --
         JSStringRef compileName = JSStringCreateWithUTF8CString("compile");
         JSObjectRef compileFunc = JSObjectMakeFunctionWithCallback(jsCtx, compileName, WASM_Compile);
-        JSObjectSetProperty(jsCtx, wasmObj, compileName, compileFunc,
-                            kJSPropertyAttributeDontDelete, nullptr);
+        JSObjectSetProperty(jsCtx, wasmObj, compileName, compileFunc, kJSPropertyAttributeDontDelete, nullptr);
         JSStringRelease(compileName);
 
         // -- instantiate --
         JSStringRef instantiateName = JSStringCreateWithUTF8CString("instantiate");
-        JSObjectRef instantiateFunc = JSObjectMakeFunctionWithCallback(
-            jsCtx, instantiateName, WASM_Instantiate);
-        JSObjectSetProperty(jsCtx, wasmObj, instantiateName, instantiateFunc,
-                            kJSPropertyAttributeDontDelete, nullptr);
+        JSObjectRef instantiateFunc = JSObjectMakeFunctionWithCallback(jsCtx, instantiateName, WASM_Instantiate);
+        JSObjectSetProperty(jsCtx, wasmObj, instantiateName, instantiateFunc, kJSPropertyAttributeDontDelete, nullptr);
         JSStringRelease(instantiateName);
 
         // -- Module constructor --
         JSStringRef moduleName = JSStringCreateWithUTF8CString("Module");
-        JSObjectRef moduleCtor = JSObjectMakeConstructor(jsCtx, GetWASMModuleClass(),
-                                                          WASM_ModuleConstructor);
+        JSObjectRef moduleCtor = JSObjectMakeConstructor(jsCtx, GetWASMModuleClass(), WASM_ModuleConstructor);
 
         // -- Module.exports() and Module.imports() static methods --
         JSStringRef modExportsName = JSStringCreateWithUTF8CString("exports");
         JSObjectRef modExportsFunc = JSObjectMakeFunctionWithCallback(jsCtx, modExportsName, WASM_ModuleExports);
-        JSObjectSetProperty(jsCtx, moduleCtor, modExportsName, modExportsFunc,
-                            kJSPropertyAttributeDontDelete, nullptr);
+        JSObjectSetProperty(jsCtx, moduleCtor, modExportsName, modExportsFunc, kJSPropertyAttributeDontDelete, nullptr);
         JSStringRelease(modExportsName);
 
         JSStringRef modImportsName = JSStringCreateWithUTF8CString("imports");
         JSObjectRef modImportsFunc = JSObjectMakeFunctionWithCallback(jsCtx, modImportsName, WASM_ModuleImports);
-        JSObjectSetProperty(jsCtx, moduleCtor, modImportsName, modImportsFunc,
-                            kJSPropertyAttributeDontDelete, nullptr);
+        JSObjectSetProperty(jsCtx, moduleCtor, modImportsName, modImportsFunc, kJSPropertyAttributeDontDelete, nullptr);
         JSStringRelease(modImportsName);
 
-        JSObjectSetProperty(jsCtx, wasmObj, moduleName, moduleCtor,
-                            kJSPropertyAttributeDontDelete, nullptr);
+        JSObjectSetProperty(jsCtx, wasmObj, moduleName, moduleCtor, kJSPropertyAttributeDontDelete, nullptr);
         JSStringRelease(moduleName);
 
         // -- Instance constructor --
         JSStringRef instanceName = JSStringCreateWithUTF8CString("Instance");
-        JSObjectRef instanceCtor = JSObjectMakeConstructor(jsCtx, GetWASMInstanceClass(),
-                                                            WASM_InstanceConstructor);
+        JSObjectRef instanceCtor = JSObjectMakeConstructor(jsCtx, GetWASMInstanceClass(), WASM_InstanceConstructor);
         // Store viewId on the Instance constructor so it can be retrieved during instantiation
         JSStringRef viewIdPropStr = JSStringCreateWithUTF8CString("__viewId");
         JSStringRef viewIdJSStr = JSStringCreateWithUTF8CString(viewIdStr.c_str());
-        JSObjectSetProperty(jsCtx, instanceCtor, viewIdPropStr,
-                            JSValueMakeString(jsCtx, viewIdJSStr),
+        JSObjectSetProperty(jsCtx, instanceCtor, viewIdPropStr, JSValueMakeString(jsCtx, viewIdJSStr),
                             kJSPropertyAttributeDontEnum | kJSPropertyAttributeReadOnly, nullptr);
         JSStringRelease(viewIdJSStr);
         JSStringRelease(viewIdPropStr);
-        JSObjectSetProperty(jsCtx, wasmObj, instanceName, instanceCtor,
-                            kJSPropertyAttributeDontDelete, nullptr);
+        JSObjectSetProperty(jsCtx, wasmObj, instanceName, instanceCtor, kJSPropertyAttributeDontDelete, nullptr);
         JSStringRelease(instanceName);
 
         // -- Memory constructor --
         JSStringRef memoryName = JSStringCreateWithUTF8CString("Memory");
-        JSObjectRef memoryCtor = JSObjectMakeConstructor(jsCtx, GetWASMMemoryClass(),
-                                                          WASM_MemoryConstructor);
-        JSObjectSetProperty(jsCtx, wasmObj, memoryName, memoryCtor,
-                            kJSPropertyAttributeDontDelete, nullptr);
+        JSObjectRef memoryCtor = JSObjectMakeConstructor(jsCtx, GetWASMMemoryClass(), WASM_MemoryConstructor);
+        JSObjectSetProperty(jsCtx, wasmObj, memoryName, memoryCtor, kJSPropertyAttributeDontDelete, nullptr);
         JSStringRelease(memoryName);
 
         // -- Table constructor --
         JSStringRef tableName = JSStringCreateWithUTF8CString("Table");
-        JSObjectRef tableCtor = JSObjectMakeConstructor(jsCtx, GetWASMTableClass(),
-                                                         WASM_TableConstructor);
-        JSObjectSetProperty(jsCtx, wasmObj, tableName, tableCtor,
-                            kJSPropertyAttributeDontDelete, nullptr);
+        JSObjectRef tableCtor = JSObjectMakeConstructor(jsCtx, GetWASMTableClass(), WASM_TableConstructor);
+        JSObjectSetProperty(jsCtx, wasmObj, tableName, tableCtor, kJSPropertyAttributeDontDelete, nullptr);
         JSStringRelease(tableName);
 
         // -- Global constructor --
         JSStringRef globalName = JSStringCreateWithUTF8CString("Global");
-        JSObjectRef globalCtor = JSObjectMakeConstructor(jsCtx, GetWASMGlobalClass(),
-                                                          WASM_GlobalConstructor);
-        JSObjectSetProperty(jsCtx, wasmObj, globalName, globalCtor,
-                            kJSPropertyAttributeDontDelete, nullptr);
+        JSObjectRef globalCtor = JSObjectMakeConstructor(jsCtx, GetWASMGlobalClass(), WASM_GlobalConstructor);
+        JSObjectSetProperty(jsCtx, wasmObj, globalName, globalCtor, kJSPropertyAttributeDontDelete, nullptr);
         JSStringRelease(globalName);
 
         // -- Error types (minimal constructors) --

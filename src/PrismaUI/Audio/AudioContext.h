@@ -1,8 +1,5 @@
 #pragma once
 
-#include "AudioCommandQueue.h"
-#include "AudioGraph.h"
-
 #include <xaudio2.h>
 
 #include <atomic>
@@ -10,17 +7,17 @@
 #include <memory>
 #include <vector>
 
+#include "AudioCommandQueue.h"
+#include "AudioGraph.h"
+
+
 namespace PrismaUI::Audio {
 
     struct AudioBuffer;
     struct AudioContext;
     struct AudioDestinationNode;
 
-    enum class AudioContextState : uint8_t {
-        Suspended,
-        Running,
-        Closed
-    };
+    enum class AudioContextState : uint8_t { Suspended, Running, Closed };
 
     // XAudio2 voice callback + double-buffer output stage.
     struct XAudio2Output : IXAudio2VoiceCallback {
@@ -44,15 +41,15 @@ namespace PrismaUI::Audio {
     };
 
     struct AudioContext {
-        XAudio2Output xaOutput;                        // XAudio2 voice + double-buffer
-        IXAudio2* xaEngine = nullptr;                  // Owned — created via XAudio2Create()
-        IXAudio2MasteringVoice* masterVoice = nullptr; // Owned — routes to default output device
+        XAudio2Output xaOutput;                         // XAudio2 voice + double-buffer
+        IXAudio2* xaEngine = nullptr;                   // Owned — created via XAudio2Create()
+        IXAudio2MasteringVoice* masterVoice = nullptr;  // Owned — routes to default output device
 
         std::atomic<AudioContextState> state{AudioContextState::Suspended};
         std::atomic<bool> destroying{false};
         float sampleRate = 48000.0f;
         std::atomic<double> currentTime_{0.0};  // Written by audio thread, read by JS thread
-        uint64_t renderFrame = 0;   // Incremented each render batch for cycle detection
+        uint64_t renderFrame = 0;               // Incremented each render batch for cycle detection
 
         // Approximate count of orphaned nodes awaiting JS-thread collection.
         // Incremented by audio thread (sweep), reset by JS thread (collect).
@@ -72,6 +69,9 @@ namespace PrismaUI::Audio {
 
         // The output sink — always the first node created, never null while context lives.
         AudioDestinationNode* destinationNode = nullptr;
+
+        void* cachedDestinationObj = nullptr;  // JSObjectRef
+        void* cachedDestinationCtx = nullptr;  // JSContextRef (for JSValueUnprotect on destroy)
 
         std::atomic<bool> destroyed{false};
     };

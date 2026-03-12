@@ -7,7 +7,6 @@ namespace PrismaUI::Audio {
     void ConnectNodes(AudioNode* source, AudioNode* destination) {
         if (!source || !destination) return;
 
-        // [020] Guard against self-connections which would create infinite render cycles
         if (source == destination) return;
 
         // Prevent duplicate connections

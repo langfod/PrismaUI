@@ -97,11 +97,14 @@ namespace PrismaUI::ViewManager {
 
         PrismaUI::InputHandler::DisableInputCapture(viewId);
         viewData->ultralightView->Unfocus();
-        g_anyViewHasFocus.store(false, std::memory_order_release);
 
         if (closeFocusMenu) {
+            // Full unfocus — no other view is taking focus, safe to clear
+            g_anyViewHasFocus.store(false, std::memory_order_release);
             FocusMenu::Close();
         }
+        // When closeFocusMenu==false we are switching focus between views;
+        // the new view already set g_anyViewHasFocus=true, don't clobber it.
 
         auto controlMap = RE::ControlMap::GetSingleton();
         controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kWheelZoom, true, false);
@@ -490,13 +493,13 @@ namespace PrismaUI::ViewManager {
                 }
 
                 // Clean up WASM instances
-                if (viewData->wasmInstances) {
+                if (!viewData->wasmInstances.empty()) {
                     logger::debug("Destroy: Releasing {} WASM instance(s) for View [{}]",
-                                  viewData->wasmInstances->size(), viewId);
-                    for (auto& inst : *viewData->wasmInstances) {
+                                  viewData->wasmInstances.size(), viewId);
+                    for (auto& inst : viewData->wasmInstances) {
                         WASM::DestroyInstance(inst);
                     }
-                    viewData->wasmInstances.reset();
+                    viewData->wasmInstances.clear();
                 }
 
                 // Clean up audio context

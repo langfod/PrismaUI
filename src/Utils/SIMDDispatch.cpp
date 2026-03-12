@@ -8,7 +8,6 @@
 namespace PrismaUI::SIMD {
 
     static InstructionSet g_ActiveInstructionSet = InstructionSet::None;
-    // [095] Guard: set to true at the end of Initialize(). DEBUG asserts in each
     // Generic:: dispatcher catch callers that skip Initialize() entirely.
     static std::atomic<bool> g_simdInitialized{false};
 
@@ -177,8 +176,10 @@ namespace PrismaUI::SIMD {
         }
 
         void SwizzleFlipPixels(void* dest, const void* src, uint32_t width, uint32_t height) {
-            // [096] In-place operation corrupts data (top rows overwritten before read).
-            assert(dest != src && "SwizzleFlipPixels does not support in-place operation");
+            if (dest == src) {
+                logger::error("SwizzleFlipPixels: in-place operation not supported");
+                return;
+            }
 #ifdef _DEBUG
             assert(g_simdInitialized.load(std::memory_order_acquire) &&
                    "SIMD::Initialize() must be called before using SIMD functions");

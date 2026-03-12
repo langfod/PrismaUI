@@ -14,6 +14,7 @@ namespace PrismaUI::WebGL {
         if (!c || !c->initialized || argc < 1) return JSValueMakeNull(ctx);
         GLenum type = static_cast<GLenum>(JSValueToNumber(ctx, argv[0], nullptr));
         GLuint shader = glCreateShader(type);
+        if (shader == 0) return JSValueMakeNull(ctx);
         return MakeGLObject(ctx, "WebGLShader", shader);
     }
 
@@ -96,6 +97,7 @@ namespace PrismaUI::WebGL {
         auto* c = GetContext(thisObject);
         if (!c || !c->initialized) return JSValueMakeNull(ctx);
         GLuint prog = glCreateProgram();
+        if (prog == 0) return JSValueMakeNull(ctx);
         return MakeGLObject(ctx, "WebGLProgram", prog);
     }
 

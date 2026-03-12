@@ -42,12 +42,12 @@ namespace PrismaUI::WASM {
         // Per-import trampoline context. Stored here for lifetime management.
         struct TrampolineData {
             JSContextRef ctx;
-            JSObjectRef jsFunc;       // Protected JS function reference
+            JSObjectRef jsFunc;  // Protected JS function reference
             uint32_t paramCount;
             uint32_t resultCount;
             std::vector<wasm_valkind_t> paramTypes;
             std::vector<wasm_valkind_t> resultTypes;
-            std::string funcName;     // For diagnostics (e.g. "_emscripten_memcpy_big")
+            std::string funcName;  // For diagnostics (e.g. "_emscripten_memcpy_big")
         };
         std::vector<TrampolineData*> trampolines;
     };
@@ -56,8 +56,7 @@ namespace PrismaUI::WASM {
     // build NativeSymbol arrays, and register them with WAMR.
     // Returns true on success. On failure, sets *exception and returns false.
     // The caller must call CleanupImports() regardless of success/failure.
-    bool ResolveImports(JSContextRef ctx, wasm_module_t wasmModule,
-                        JSValueRef jsImports, ImportContext& outCtx,
+    bool ResolveImports(JSContextRef ctx, wasm_module_t wasmModule, JSValueRef jsImports, ImportContext& outCtx,
                         JSValueRef* exception);
 
     // Unregister all native symbols that were registered by ResolveImports,

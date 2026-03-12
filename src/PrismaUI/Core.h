@@ -95,7 +95,7 @@ namespace PrismaUI::Core {
 
         // WASM support
         // Tracks all live WASM instances for this view, cleaned up on view destroy.
-        std::unique_ptr<std::vector<WASM::WASMInstanceHandle>> wasmInstances;
+        std::vector<WASM::WASMInstanceHandle> wasmInstances;
 
         // Inspector rendering data
         // 32-byte aligned buffer for optimal SIMD performance

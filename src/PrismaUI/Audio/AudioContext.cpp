@@ -1,24 +1,25 @@
 #include "AudioContext.h"
-#include "AudioBuffer.h"
-#include "AudioNodes.h"
 
+#include <JavaScriptCore/JavaScript.h>
 #include <xaudio2.h>
 
 #include <algorithm>
 #include <cstring>
 
+#include "AudioBuffer.h"
+#include "AudioNodes.h"
+
+
 namespace logger = SKSE::log;
 
 namespace PrismaUI::Audio {
 
-    // Walk the audio graph from a node and disconnect any ended BufferSourceNodes
-    // from input/output lists.  Runs on audio thread only — inputs/outputs are
-    // exclusively mutated here (via command-queue drain + this sweep).
+    // Walk the audio graph from a node and disconnect any ended BufferSourceNodes from input/output lists.
     static void SweepEndedSources(AudioContext* ctx, AudioNode* node, uint32_t depth = 0) {
         if (!node || depth > 16) return;
 
         auto& ins = node->inputs;
-        for (auto it = ins.begin(); it != ins.end(); ) {
+        for (auto it = ins.begin(); it != ins.end();) {
             AudioNode* input = *it;
 
             if (input->type == AudioNode::Type::BufferSource) {
@@ -72,17 +73,17 @@ namespace PrismaUI::Audio {
         ctx->renderFrame++;
 
         if (ctx->destinationNode) {
-            ctx->destinationNode->Process(scratchL, scratchR,
-                frames, ctx->currentTime_.load(std::memory_order_relaxed), ctx->sampleRate);
+            ctx->destinationNode->Process(scratchL, scratchR, frames, ctx->currentTime_.load(std::memory_order_relaxed),
+                                          ctx->sampleRate);
 
             // Disconnect ended BufferSourceNodes from the graph so they stop
-            // being iterated on every render.  This keeps Process() O(active nodes).
+            // being iterated on every render.
             SweepEndedSources(ctx, ctx->destinationNode);
         }
 
         // Interleave into XAudio2 buffer (L, R, L, R, ...)
         for (uint32_t i = 0; i < frames; ++i) {
-            buf[i * 2]     = scratchL[i];
+            buf[i * 2] = scratchL[i];
             buf[i * 2 + 1] = scratchR[i];
         }
 
@@ -95,7 +96,6 @@ namespace PrismaUI::Audio {
         xaBuf.AudioBytes = XAudio2Output::kBufferBytes;
         xaBuf.pAudioData = reinterpret_cast<const BYTE*>(buf);
         xaBuf.pContext = ctx;
-        // [014] Check HRESULT from SubmitSourceBuffer
         HRESULT hr = xa.sourceVoice->SubmitSourceBuffer(&xaBuf);
         if (FAILED(hr)) {
             logger::error("[Audio] SubmitSourceBuffer failed: {:08X}", static_cast<uint32_t>(hr));
@@ -106,9 +106,6 @@ namespace PrismaUI::Audio {
 
     void XAudio2Output::OnBufferEnd(void* pBufferContext) {
         auto* context = static_cast<AudioContext*>(pBufferContext);
-        // [016] Check destroying flag before touching any context members.
-        // Set before Stop/Flush in DestroyAudioContext; DestroyVoice() then blocks
-        // until any in-flight callback has returned.
         if (!context || context->destroying.load(std::memory_order_acquire)) return;
         if (context->state.load(std::memory_order_acquire) != AudioContextState::Running) return;
         RenderAndSubmit(context);
@@ -141,31 +138,28 @@ namespace PrismaUI::Audio {
 
         // Create stereo float32 source voice
         WAVEFORMATEX wfx{};
-        wfx.wFormatTag      = WAVE_FORMAT_IEEE_FLOAT;
-        wfx.nChannels       = 2;
-        wfx.nSamplesPerSec  = static_cast<DWORD>(ctx->sampleRate);
-        wfx.wBitsPerSample  = 32;
-        wfx.nBlockAlign     = wfx.nChannels * (wfx.wBitsPerSample / 8);
+        wfx.wFormatTag = WAVE_FORMAT_IEEE_FLOAT;
+        wfx.nChannels = 2;
+        wfx.nSamplesPerSec = static_cast<DWORD>(ctx->sampleRate);
+        wfx.wBitsPerSample = 32;
+        wfx.nBlockAlign = wfx.nChannels * (wfx.wBitsPerSample / 8);
         wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
-        wfx.cbSize          = 0;
+        wfx.cbSize = 0;
 
         ctx->xaOutput.ctx = ctx;
 
         static constexpr float kDefaultVolume = 1.0f;
 
-        hr = ctx->xaEngine->CreateSourceVoice(
-            &ctx->xaOutput.sourceVoice,
-            &wfx,
-            0,                          // flags
-            XAUDIO2_DEFAULT_FREQ_RATIO, // maxFrequencyRatio
-            &ctx->xaOutput,             // voice callback
-            nullptr,                    // send list (nullptr = mastering voice)
-            nullptr                     // effect chain
+        hr = ctx->xaEngine->CreateSourceVoice(&ctx->xaOutput.sourceVoice, &wfx,
+                                              0,                           // flags
+                                              XAUDIO2_DEFAULT_FREQ_RATIO,  // maxFrequencyRatio
+                                              &ctx->xaOutput,              // voice callback
+                                              nullptr,                     // send list (nullptr = mastering voice)
+                                              nullptr                      // effect chain
         );
 
         if (FAILED(hr)) {
-            logger::error("[Audio] Failed to create XAudio2 source voice: 0x{:X}",
-                          static_cast<uint32_t>(hr));
+            logger::error("[Audio] Failed to create XAudio2 source voice: 0x{:X}", static_cast<uint32_t>(hr));
             ctx->masterVoice->DestroyVoice();
             ctx->xaEngine->Release();
             delete ctx;
@@ -174,7 +168,6 @@ namespace PrismaUI::Audio {
 
         ctx->xaOutput.sourceVoice->SetVolume(kDefaultVolume);
 
-        // Create destination node
         auto dest = std::make_unique<AudioDestinationNode>();
         dest->context = ctx;
         dest->channelCount = 2;
@@ -183,8 +176,7 @@ namespace PrismaUI::Audio {
 
         ctx->state.store(AudioContextState::Suspended, std::memory_order_relaxed);
 
-        logger::info("[Audio] AudioContext created (standalone XAudio2, sampleRate={})",
-                     ctx->sampleRate);
+        logger::info("[Audio] AudioContext created (standalone XAudio2, sampleRate={})", ctx->sampleRate);
         return ctx;
     }
 
@@ -197,16 +189,13 @@ namespace PrismaUI::Audio {
             RenderAndSubmit(ctx);
             RenderAndSubmit(ctx);
 
-            // Start the voice (begins consuming submitted buffers)
-            // [013] Check HRESULT from Start()
             HRESULT hr = ctx->xaOutput.sourceVoice->Start();
             if (FAILED(hr)) {
-                logger::error("[Audio] IXAudio2SourceVoice::Start() failed: {:08X}",
-                              static_cast<uint32_t>(hr));
+                logger::error("[Audio] IXAudio2SourceVoice::Start() failed: {:08X}", static_cast<uint32_t>(hr));
                 ctx->state.store(AudioContextState::Suspended, std::memory_order_release);
+            } else {
+                logger::debug("[Audio] AudioContext resumed (XAudio2)");
             }
-
-            logger::debug("[Audio] AudioContext resumed (XAudio2)");
         }
     }
 
@@ -224,16 +213,19 @@ namespace PrismaUI::Audio {
         if (!ctx || ctx->destroyed.load(std::memory_order_acquire)) return;
         ctx->destroyed.store(true, std::memory_order_release);
 
-        // [016] Signal the audio callback to stop re-entering before touching the voice.
-        // OnBufferEnd checks this flag first; DestroyVoice() then blocks until any
-        // in-flight callback has returned, so delete ctx is safe after that.
+        if (ctx->cachedDestinationObj && ctx->cachedDestinationCtx) {
+            JSValueUnprotect(static_cast<JSContextRef>(ctx->cachedDestinationCtx),
+                             static_cast<JSObjectRef>(ctx->cachedDestinationObj));
+            ctx->cachedDestinationObj = nullptr;
+            ctx->cachedDestinationCtx = nullptr;
+        }
+
         ctx->destroying.store(true, std::memory_order_release);
         ctx->state.store(AudioContextState::Closed, std::memory_order_release);
 
         if (ctx->xaOutput.sourceVoice) {
             ctx->xaOutput.sourceVoice->Stop();
             ctx->xaOutput.sourceVoice->FlushSourceBuffers();
-            // DestroyVoice() blocks until all in-flight callbacks have returned
             ctx->xaOutput.sourceVoice->DestroyVoice();
             ctx->xaOutput.sourceVoice = nullptr;
         }
@@ -260,16 +252,13 @@ namespace PrismaUI::Audio {
         if (!ctx) return;
 
         // Phase 1: collect buffer pointers from orphaned source nodes, then erase them.
-        // Safe because ctx->nodes is only appended-to by the JS thread (us), and the
-        // audio thread never indexes into ctx->nodes (it traverses via graph edges).
         std::vector<AudioBuffer*> candidateBuffers;
         size_t deadNodeCount = 0;
 
         auto& nodes = ctx->nodes;
-        for (auto it = nodes.begin(); it != nodes.end(); ) {
+        for (auto it = nodes.begin(); it != nodes.end();) {
             AudioNode* n = it->get();
-            if (n->type != AudioNode::Type::Destination &&
-                n->graphOrphaned.load(std::memory_order_acquire)) {
+            if (n->type != AudioNode::Type::Destination && n->graphOrphaned.load(std::memory_order_acquire)) {
                 if (n->type == AudioNode::Type::BufferSource) {
                     auto* src = static_cast<AudioBufferSourceNode*>(n);
                     AudioBuffer* b = src->buffer.load(std::memory_order_relaxed);
@@ -314,9 +303,7 @@ namespace PrismaUI::Audio {
         }
 
         ctx->orphanedNodeCount.store(0, std::memory_order_relaxed);
-        // [017] First arg is dead-node count, second is candidate-buffer count
-        logger::debug("[Audio] Collected {} dead nodes, {} candidate buffers",
-                     deadNodeCount, candidateBuffers.size());
+        logger::debug("[Audio] Collected {} dead nodes, {} candidate buffers", deadNodeCount, candidateBuffers.size());
     }
 
 }  // namespace PrismaUI::Audio

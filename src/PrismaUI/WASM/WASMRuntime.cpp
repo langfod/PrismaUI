@@ -13,7 +13,7 @@ namespace PrismaUI::WASM {
     // taken when the count drops to zero and we need to shut down.
     static std::mutex rtMutex;
     static std::atomic<bool> g_runtimeInitialized{false};
-    static std::atomic<int>  g_liveObjectCount{0};
+    static std::atomic<int> g_liveObjectCount{0};
 
     bool EnsureRuntimeInitialized() {
         if (g_runtimeInitialized.load(std::memory_order_acquire)) return true;
@@ -35,9 +35,7 @@ namespace PrismaUI::WASM {
         return true;
     }
 
-    void AddLiveObject() {
-        g_liveObjectCount.fetch_add(1, std::memory_order_relaxed);
-    }
+    void AddLiveObject() { g_liveObjectCount.fetch_add(1, std::memory_order_relaxed); }
 
     void RemoveLiveObject() {
         int prev = g_liveObjectCount.fetch_sub(1, std::memory_order_acq_rel);
@@ -90,8 +88,6 @@ namespace PrismaUI::WASM {
         }
     }
 
-    bool IsRuntimeInitialized() {
-        return g_runtimeInitialized.load(std::memory_order_acquire);
-    }
+    bool IsRuntimeInitialized() { return g_runtimeInitialized.load(std::memory_order_acquire); }
 
 }  // namespace PrismaUI::WASM

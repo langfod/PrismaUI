@@ -5,7 +5,6 @@
 #include "PrismaUI_API.h"
 #include "Audio/AudioBridge.h"
 #include "Audio/AudioShim.h"
-#include "Stubs/WebAudioStub.h"
 #include "WASM/WASMBridge.h"
 #include "WebGL/WebGLBridge.h"
 #include "WebGL/WebGLShim.h"
@@ -53,12 +52,6 @@ namespace PrismaUI::Listeners {
             std::string escapedAudio = EscapeForJSString(audioShimJS);
             std::string storeAudioScript = "window.__prismaAudioShimSource = '" + escapedAudio + "';";
             caller->EvaluateScript(String(storeAudioScript.c_str()), nullptr, String(""));
-        } else {
-            // Fallback to no-op stub if shim file not found
-            const char* audioStubJS = Stubs::GetWebAudioStubJS();
-            if (audioStubJS && audioStubJS[0]) {
-                caller->EvaluateScript(String(audioStubJS), nullptr, String(""));
-            }
         }
 
         if (isAccelerated) {

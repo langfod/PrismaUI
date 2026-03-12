@@ -1,6 +1,4 @@
 #include "WASMBridgeObjects.h"
-#include "WASMBridge.h"
-#include "WASMRuntime.h"
 
 #include <JavaScriptCore/JavaScript.h>
 #include <wasm_export.h>
@@ -9,15 +7,35 @@
 #include <cstring>
 #include <string>
 
+#include "WASMBridge.h"
+#include "WASMRuntime.h"
+
 // Forward-declare WAMR internal table enlarge function.
 // In interpreter mode (our configuration), wasm_module_inst_t (WASMModuleInstanceCommon*)
 // points to a WASMModuleInstance. The internal function operates on that type.
 // We cast at the call site. This is pinned to WAMR 2.2.0 via FetchContent.
 struct WASMModuleInstance;
-extern "C" bool wasm_enlarge_table(WASMModuleInstance* module_inst, uint32_t table_idx,
-                                   uint32_t inc_entries, uintptr_t init_val);
+extern "C" bool wasm_enlarge_table(WASMModuleInstance* module_inst, uint32_t table_idx, uint32_t inc_entries,
+                                   uintptr_t init_val);
 
 namespace PrismaUI::WASM {
+
+    // Validate a JS double for safe conversion to uint32_t.
+    // Returns true and writes *out on success. On failure, sets *exception and returns false.
+    static bool ValidateUint32(JSContextRef ctx, double val, uint32_t maxAllowed, const char* typeName,
+                               const char* propName, uint32_t* out, JSValueRef* exception) {
+        if (!std::isfinite(val) || val < 0 || val > static_cast<double>(maxAllowed)) {
+            std::string errMsg = std::string("WebAssembly.") + typeName + ": '" + propName +
+                                 "' must be a non-negative integer <= " + std::to_string(maxAllowed);
+            JSStringRef errStr = JSStringCreateWithUTF8CString(errMsg.c_str());
+            JSValueRef errVal = JSValueMakeString(ctx, errStr);
+            JSStringRelease(errStr);
+            *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
+            return false;
+        }
+        *out = static_cast<uint32_t>(val);
+        return true;
+    }
 
     // =========================================================================
     //  MEMORY
@@ -28,7 +46,6 @@ namespace PrismaUI::WASM {
     static void WASMMemoryFinalize(JSObjectRef obj) {
         auto* data = static_cast<WASMMemoryData*>(JSObjectGetPrivate(obj));
         if (data) {
-            // [064] Unprotect the cached ArrayBuffer before freeing its owner
             if (data->cachedBuffer && data->ctx) {
                 JSValueUnprotect(data->ctx, data->cachedBuffer);
                 data->cachedBuffer = nullptr;
@@ -36,7 +53,6 @@ namespace PrismaUI::WASM {
             if (data->instanceRef && data->ctx) {
                 JSValueUnprotect(data->ctx, data->instanceRef);
             }
-            // [060] For standalone memory, deinstantiate and unload the miniModule
             if (data->ownsMemory && data->moduleInst) {
                 wasm_runtime_deinstantiate(data->moduleInst);
             }
@@ -50,9 +66,8 @@ namespace PrismaUI::WASM {
 
     // --- Memory.prototype.grow(delta) -> oldPageCount ---
 
-    static JSValueRef WASM_MemoryGrow(JSContextRef ctx, JSObjectRef /*function*/,
-                                       JSObjectRef thisObject, size_t argc,
-                                       const JSValueRef argv[], JSValueRef* exception) {
+    static JSValueRef WASM_MemoryGrow(JSContextRef ctx, JSObjectRef /*function*/, JSObjectRef thisObject, size_t argc,
+                                      const JSValueRef argv[], JSValueRef* exception) {
         auto* mem = static_cast<WASMMemoryData*>(JSObjectGetPrivate(thisObject));
         if (!mem || !mem->memoryInst) {
             JSStringRef errStr = JSStringCreateWithUTF8CString("Memory.grow: invalid memory object");
@@ -70,7 +85,6 @@ namespace PrismaUI::WASM {
             return JSValueMakeUndefined(ctx);
         }
 
-        // [062] Validate delta before casting — NaN/negative/overflow are UB on uint64_t
         double dDelta = JSValueToNumber(ctx, argv[0], nullptr);
         if (std::isnan(dDelta) || dDelta < 0.0 || dDelta > 65536.0) {
             JSStringRef errStr = JSStringCreateWithUTF8CString(
@@ -84,15 +98,14 @@ namespace PrismaUI::WASM {
         uint64_t oldPages = wasm_memory_get_cur_page_count(mem->memoryInst);
 
         if (!wasm_memory_enlarge(mem->memoryInst, delta)) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "Memory.grow: failed to grow memory (may exceed maximum)");
+            JSStringRef errStr =
+                JSStringCreateWithUTF8CString("Memory.grow: failed to grow memory (may exceed maximum)");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
             return JSValueMakeUndefined(ctx);
         }
 
-        // [064] Unprotect then invalidate the cached ArrayBuffer — the base pointer may have changed
         if (mem->cachedBuffer && mem->ctx) {
             JSValueUnprotect(mem->ctx, mem->cachedBuffer);
         }
@@ -104,8 +117,8 @@ namespace PrismaUI::WASM {
 
     // --- Memory.prototype.buffer (getter) ---
 
-    static JSValueRef WASM_MemoryGetBuffer(JSContextRef ctx, JSObjectRef object,
-                                            JSStringRef /*propertyName*/, JSValueRef* exception) {
+    static JSValueRef WASM_MemoryGetBuffer(JSContextRef ctx, JSObjectRef object, JSStringRef /*propertyName*/,
+                                           JSValueRef* exception) {
         auto* mem = static_cast<WASMMemoryData*>(JSObjectGetPrivate(object));
         if (!mem || !mem->memoryInst) {
             return JSValueMakeUndefined(ctx);
@@ -120,11 +133,11 @@ namespace PrismaUI::WASM {
             return JSValueMakeUndefined(ctx);
         }
 
-        // [064] Unprotect and invalidate if WAMR's base pointer or size changed
         if (mem->cachedBuffer && (mem->cachedBase != base || mem->cachedSize != size)) {
             static bool loggedInvalidation = false;
             if (!loggedInvalidation) {
-                logger::info("[WASM] Memory.buffer: base pointer changed ({} -> {}, size {} -> {}) — recreating ArrayBuffer",
+                logger::info(
+                    "[WASM] Memory.buffer: base pointer changed ({} -> {}, size {} -> {}) — recreating ArrayBuffer",
                     mem->cachedBase, base, mem->cachedSize, size);
                 loggedInvalidation = true;
             }
@@ -147,7 +160,6 @@ namespace PrismaUI::WASM {
             nullptr, exception);
 
         if (buffer && !(exception && *exception)) {
-            // [064] Protect the buffer and store ctx so the finalizer can unprotect
             JSValueProtect(ctx, buffer);
             if (!mem->ctx) mem->ctx = ctx;  // Capture ctx for standalone memory finalizer
             mem->cachedBuffer = buffer;
@@ -162,10 +174,14 @@ namespace PrismaUI::WASM {
                 auto* raw = static_cast<uint8_t*>(base);
                 bool wamrAllZero = true;
                 for (size_t i = 0; i < 256 && i < size; i++) {
-                    if (raw[i] != 0) { wamrAllZero = false; break; }
+                    if (raw[i] != 0) {
+                        wamrAllZero = false;
+                        break;
+                    }
                 }
-                logger::info("[WASM] Memory.buffer created: WAMRbase={} ABptr={} match={} size={} wamrFirst256AllZero={}",
-                    base, abPtr, (base == abPtr), size, wamrAllZero);
+                logger::info(
+                    "[WASM] Memory.buffer created: WAMRbase={} ABptr={} match={} size={} wamrFirst256AllZero={}", base,
+                    abPtr, (base == abPtr), size, wamrAllZero);
                 loggedBufferCreation = true;
             }
         }
@@ -175,8 +191,8 @@ namespace PrismaUI::WASM {
 
     // --- Memory.prototype.byteLength (getter) ---
 
-    static JSValueRef WASM_MemoryGetByteLength(JSContextRef ctx, JSObjectRef object,
-                                                JSStringRef /*propertyName*/, JSValueRef* /*exception*/) {
+    static JSValueRef WASM_MemoryGetByteLength(JSContextRef ctx, JSObjectRef object, JSStringRef /*propertyName*/,
+                                               JSValueRef* /*exception*/) {
         auto* mem = static_cast<WASMMemoryData*>(JSObjectGetPrivate(object));
         if (!mem || !mem->memoryInst) {
             return JSValueMakeNumber(ctx, 0);
@@ -191,16 +207,14 @@ namespace PrismaUI::WASM {
 
     JSClassRef GetWASMMemoryClass() {
         static JSClassRef cls = []() {
-            static JSStaticValue kMemoryValues[] = {
-                {"buffer", WASM_MemoryGetBuffer, nullptr, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
-                {"byteLength", WASM_MemoryGetByteLength, nullptr, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
-                {nullptr, nullptr, nullptr, 0}
-            };
+            static JSStaticValue kMemoryValues[] = {{"buffer", WASM_MemoryGetBuffer, nullptr,
+                                                     kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
+                                                    {"byteLength", WASM_MemoryGetByteLength, nullptr,
+                                                     kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
+                                                    {nullptr, nullptr, nullptr, 0}};
 
-            static JSStaticFunction kMemoryFunctions[] = {
-                {"grow", WASM_MemoryGrow, kJSPropertyAttributeDontDelete},
-                {nullptr, nullptr, 0}
-            };
+            static JSStaticFunction kMemoryFunctions[] = {{"grow", WASM_MemoryGrow, kJSPropertyAttributeDontDelete},
+                                                          {nullptr, nullptr, 0}};
 
             JSClassDefinition def{};
             def.className = "WebAssembly.Memory";
@@ -214,12 +228,10 @@ namespace PrismaUI::WASM {
 
     // --- WebAssembly.Memory constructor ---
 
-    JSObjectRef WASM_MemoryConstructor(JSContextRef ctx, JSObjectRef /*constructor*/,
-                                       size_t argc, const JSValueRef argv[],
-                                       JSValueRef* exception) {
+    JSObjectRef WASM_MemoryConstructor(JSContextRef ctx, JSObjectRef /*constructor*/, size_t argc,
+                                       const JSValueRef argv[], JSValueRef* exception) {
         if (argc < 1 || !JSValueIsObject(ctx, argv[0])) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Memory requires a descriptor object");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Memory requires a descriptor object");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -234,15 +246,20 @@ namespace PrismaUI::WASM {
         JSStringRelease(initialProp);
 
         if (!JSValueIsNumber(ctx, initialVal)) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Memory: 'initial' is required and must be a number");
+            JSStringRef errStr =
+                JSStringCreateWithUTF8CString("WebAssembly.Memory: 'initial' is required and must be a number");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
             return JSObjectMake(ctx, nullptr, nullptr);
         }
 
-        uint32_t initial = static_cast<uint32_t>(JSValueToNumber(ctx, initialVal, nullptr));
+        uint32_t initial;
+        {
+            double raw = JSValueToNumber(ctx, initialVal, nullptr);
+            if (!ValidateUint32(ctx, raw, 65536, "Memory", "initial", &initial, exception))
+                return JSObjectMake(ctx, nullptr, nullptr);
+        }
 
         // Read 'maximum' (optional)
         uint32_t maximum = 65536;  // WASM spec max: 4GB / 64KB per page
@@ -251,12 +268,14 @@ namespace PrismaUI::WASM {
         JSStringRelease(maximumProp);
 
         if (JSValueIsNumber(ctx, maximumVal)) {
-            maximum = static_cast<uint32_t>(JSValueToNumber(ctx, maximumVal, nullptr));
+            double raw = JSValueToNumber(ctx, maximumVal, nullptr);
+            if (!ValidateUint32(ctx, raw, 65536, "Memory", "maximum", &maximum, exception))
+                return JSObjectMake(ctx, nullptr, nullptr);
         }
 
         if (initial > maximum) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Memory: 'initial' must not exceed 'maximum'");
+            JSStringRef errStr =
+                JSStringCreateWithUTF8CString("WebAssembly.Memory: 'initial' must not exceed 'maximum'");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -264,8 +283,7 @@ namespace PrismaUI::WASM {
         }
 
         if (!EnsureRuntimeInitialized()) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Memory: failed to initialize WASM runtime");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Memory: failed to initialize WASM runtime");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -304,7 +322,7 @@ namespace PrismaUI::WASM {
                     memSection.push_back(byte);
                 } while (val != 0);
             };
-            emitLEB(1);         // count: 1 memory
+            emitLEB(1);                  // count: 1 memory
             memSection.push_back(0x01);  // flags: has_max
             emitLEB(initial);
             emitLEB(maximum);
@@ -338,9 +356,8 @@ namespace PrismaUI::WASM {
 
         // Load the mini module
         char errorBuf[128] = {};
-        wasm_module_t miniModule = wasm_runtime_load(
-            wasmBytes.data(), static_cast<uint32_t>(wasmBytes.size()),
-            errorBuf, sizeof(errorBuf));
+        wasm_module_t miniModule =
+            wasm_runtime_load(wasmBytes.data(), static_cast<uint32_t>(wasmBytes.size()), errorBuf, sizeof(errorBuf));
 
         if (!miniModule) {
             std::string errMsg = "WebAssembly.Memory: internal module load failed: ";
@@ -355,8 +372,7 @@ namespace PrismaUI::WASM {
         }
 
         // Instantiate with enough stack/heap for the memory
-        wasm_module_inst_t miniInst = wasm_runtime_instantiate(
-            miniModule, 4096, 0, errorBuf, sizeof(errorBuf));
+        wasm_module_inst_t miniInst = wasm_runtime_instantiate(miniModule, 4096, 0, errorBuf, sizeof(errorBuf));
 
         if (!miniInst) {
             std::string errMsg = "WebAssembly.Memory: internal instantiation failed: ";
@@ -377,15 +393,13 @@ namespace PrismaUI::WASM {
             wasm_runtime_deinstantiate(miniInst);
             wasm_runtime_unload(miniModule);
 
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Memory: failed to create memory");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Memory: failed to create memory");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
             return JSObjectMake(ctx, nullptr, nullptr);
         }
 
-        // [060] Store ctx for finalizer use (cachedBuffer unprotect) and miniModule for cleanup
         auto* memData = new WASMMemoryData{miniInst, memInst, nullptr, nullptr, 0, true, ctx, nullptr, miniModule};
 
         AddLiveObject();
@@ -397,11 +411,9 @@ namespace PrismaUI::WASM {
 
     // --- WrapMemoryExport ---
 
-    JSObjectRef WrapMemoryExport(JSContextRef ctx, wasm_module_inst_t moduleInst,
-                                  wasm_memory_inst_t memoryInst,
-                                  JSObjectRef instanceObj) {
-        auto* memData = new WASMMemoryData{moduleInst, memoryInst, nullptr, nullptr, 0, false,
-                                           ctx, instanceObj};
+    JSObjectRef WrapMemoryExport(JSContextRef ctx, wasm_module_inst_t moduleInst, wasm_memory_inst_t memoryInst,
+                                 JSObjectRef instanceObj) {
+        auto* memData = new WASMMemoryData{moduleInst, memoryInst, nullptr, nullptr, 0, false, ctx, instanceObj};
         if (instanceObj) {
             JSValueProtect(ctx, instanceObj);
         }
@@ -422,7 +434,6 @@ namespace PrismaUI::WASM {
             if (data->instanceRef && data->ctx) {
                 JSValueUnprotect(data->ctx, data->instanceRef);
             }
-            // [061] For standalone table, deinstantiate and unload the miniModule
             if (data->ownsTable && data->moduleInst) {
                 wasm_runtime_deinstantiate(data->moduleInst);
             }
@@ -436,8 +447,8 @@ namespace PrismaUI::WASM {
 
     // --- Table.prototype.length (getter) ---
 
-    static JSValueRef WASM_TableGetLength(JSContextRef ctx, JSObjectRef object,
-                                           JSStringRef /*propertyName*/, JSValueRef* /*exception*/) {
+    static JSValueRef WASM_TableGetLength(JSContextRef ctx, JSObjectRef object, JSStringRef /*propertyName*/,
+                                          JSValueRef* /*exception*/) {
         auto* tbl = static_cast<WASMTableData*>(JSObjectGetPrivate(object));
         if (!tbl || !tbl->moduleInst) {
             return JSValueMakeNumber(ctx, 0);
@@ -459,12 +470,10 @@ namespace PrismaUI::WASM {
 
     // --- Helper: validate a JS value as a table index ---
 
-    static bool ValidateTableIndex(JSContextRef ctx, JSValueRef val,
-                                    uint32_t maxSize, uint32_t& outIndex,
-                                    const char* caller, JSValueRef* exception) {
+    static bool ValidateTableIndex(JSContextRef ctx, JSValueRef val, uint32_t maxSize, uint32_t& outIndex,
+                                   const char* caller, JSValueRef* exception) {
         double d = JSValueToNumber(ctx, val, nullptr);
-        if (std::isnan(d) || d < 0 || d >= static_cast<double>(maxSize) ||
-            d != std::floor(d)) {
+        if (std::isnan(d) || d < 0 || d >= static_cast<double>(maxSize) || d != std::floor(d)) {
             std::string msg = std::string(caller) + ": index out of bounds";
             JSStringRef errStr = JSStringCreateWithUTF8CString(msg.c_str());
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
@@ -478,9 +487,8 @@ namespace PrismaUI::WASM {
 
     // --- Table.prototype.get(index) -> Function|null ---
 
-    static JSValueRef WASM_TableGet(JSContextRef ctx, JSObjectRef /*function*/,
-                                     JSObjectRef thisObject, size_t argc,
-                                     const JSValueRef argv[], JSValueRef* exception) {
+    static JSValueRef WASM_TableGet(JSContextRef ctx, JSObjectRef /*function*/, JSObjectRef thisObject, size_t argc,
+                                    const JSValueRef argv[], JSValueRef* exception) {
         auto* tbl = static_cast<WASMTableData*>(JSObjectGetPrivate(thisObject));
         if (!tbl || !tbl->moduleInst) {
             JSStringRef errStr = JSStringCreateWithUTF8CString("Table.get: invalid table object");
@@ -499,8 +507,7 @@ namespace PrismaUI::WASM {
         }
 
         uint32_t index;
-        if (!ValidateTableIndex(ctx, argv[0], tbl->tableInfo.cur_size, index,
-                                "Table.get", exception)) {
+        if (!ValidateTableIndex(ctx, argv[0], tbl->tableInfo.cur_size, index, "Table.get", exception)) {
             return JSValueMakeUndefined(ctx);
         }
 
@@ -509,8 +516,7 @@ namespace PrismaUI::WASM {
             return JSValueMakeNull(ctx);
         }
 
-        wasm_function_inst_t func = wasm_table_get_func_inst(
-            tbl->moduleInst, &tbl->tableInfo, index);
+        wasm_function_inst_t func = wasm_table_get_func_inst(tbl->moduleInst, &tbl->tableInfo, index);
 
         if (!func) {
             return JSValueMakeNull(ctx);
@@ -551,11 +557,9 @@ namespace PrismaUI::WASM {
             JSObjectRef instanceRef;  // JSValueProtect'd
         };
 
-        auto* tfc = new TableFuncContext{
-            tbl->execEnv, tbl->moduleInst, func,
-            paramCount, resultCount,
-            std::move(paramTypes), std::move(resultTypes),
-            ctx, tbl->instanceRef};
+        auto* tfc =
+            new TableFuncContext{tbl->execEnv,          tbl->moduleInst,        func, paramCount,      resultCount,
+                                 std::move(paramTypes), std::move(resultTypes), ctx,  tbl->instanceRef};
         if (tbl->instanceRef) {
             JSValueProtect(ctx, tbl->instanceRef);
         }
@@ -574,10 +578,8 @@ namespace PrismaUI::WASM {
                     delete tfc;
                 }
             };
-            def.callAsFunction = [](JSContextRef ctx, JSObjectRef function,
-                                    JSObjectRef /*thisObject*/, size_t argc,
-                                    const JSValueRef argv[],
-                                    JSValueRef* exception) -> JSValueRef {
+            def.callAsFunction = [](JSContextRef ctx, JSObjectRef function, JSObjectRef /*thisObject*/, size_t argc,
+                                    const JSValueRef argv[], JSValueRef* exception) -> JSValueRef {
                 auto* tfc = static_cast<TableFuncContext*>(JSObjectGetPrivate(function));
                 if (!tfc || !tfc->execEnv || !tfc->wasmFunc) {
                     return JSValueMakeUndefined(ctx);
@@ -597,8 +599,7 @@ namespace PrismaUI::WASM {
 
                 uint32_t slotIdx = 0;
                 for (uint32_t i = 0; i < tfc->paramCount && i < static_cast<uint32_t>(argc); i++) {
-                    wasm_valkind_t paramType = (i < tfc->paramTypes.size()) ?
-                        tfc->paramTypes[i] : WASM_I32;
+                    wasm_valkind_t paramType = (i < tfc->paramTypes.size()) ? tfc->paramTypes[i] : WASM_I32;
 
                     if (paramType == WASM_F64) {
                         double val = JSValueToNumber(ctx, argv[i], nullptr);
@@ -613,16 +614,14 @@ namespace PrismaUI::WASM {
                         memcpy(&wasmArgv[slotIdx], &val, sizeof(int64_t));
                         slotIdx += 2;
                     } else {
-                        wasmArgv[slotIdx] = static_cast<uint32_t>(
-                            static_cast<int32_t>(JSValueToNumber(ctx, argv[i], nullptr)));
+                        wasmArgv[slotIdx] =
+                            static_cast<uint32_t>(static_cast<int32_t>(JSValueToNumber(ctx, argv[i], nullptr)));
                         slotIdx += 1;
                     }
                 }
 
-                if (!SEHCallWasm(tfc->execEnv, tfc->wasmFunc,
-                                 slotIdx, wasmArgv)) {
-                    const char* exceptionMsg = wasm_runtime_get_exception(
-                        wasm_runtime_get_module_inst(tfc->execEnv));
+                if (!SEHCallWasm(tfc->execEnv, tfc->wasmFunc, slotIdx, wasmArgv)) {
+                    const char* exceptionMsg = wasm_runtime_get_exception(wasm_runtime_get_module_inst(tfc->execEnv));
                     std::string errStr = exceptionMsg ? exceptionMsg : "WASM runtime error";
                     logger::error("[WASM] Table function call failed: {}", errStr);
 
@@ -637,8 +636,7 @@ namespace PrismaUI::WASM {
                     return JSValueMakeUndefined(ctx);
                 }
 
-                wasm_valkind_t resultType = tfc->resultTypes.empty() ?
-                    WASM_I32 : tfc->resultTypes[0];
+                wasm_valkind_t resultType = tfc->resultTypes.empty() ? WASM_I32 : tfc->resultTypes[0];
 
                 if (resultType == WASM_F64) {
                     double result;
@@ -653,8 +651,7 @@ namespace PrismaUI::WASM {
                     memcpy(&result, wasmArgv, sizeof(int64_t));
                     return JSValueMakeNumber(ctx, static_cast<double>(result));
                 } else {
-                    return JSValueMakeNumber(ctx, static_cast<double>(
-                        static_cast<int32_t>(wasmArgv[0])));
+                    return JSValueMakeNumber(ctx, static_cast<double>(static_cast<int32_t>(wasmArgv[0])));
                 }
             };
             s_tableFuncClass = JSClassCreate(&def);
@@ -680,9 +677,8 @@ namespace PrismaUI::WASM {
 
     // --- Table.prototype.set(index, value) ---
 
-    static JSValueRef WASM_TableSet(JSContextRef ctx, JSObjectRef /*function*/,
-                                     JSObjectRef thisObject, size_t argc,
-                                     const JSValueRef argv[], JSValueRef* exception) {
+    static JSValueRef WASM_TableSet(JSContextRef ctx, JSObjectRef /*function*/, JSObjectRef thisObject, size_t argc,
+                                    const JSValueRef argv[], JSValueRef* exception) {
         auto* tbl = static_cast<WASMTableData*>(JSObjectGetPrivate(thisObject));
         if (!tbl || !tbl->moduleInst) {
             JSStringRef errStr = JSStringCreateWithUTF8CString("Table.set: invalid table object");
@@ -701,8 +697,7 @@ namespace PrismaUI::WASM {
         }
 
         uint32_t index;
-        if (!ValidateTableIndex(ctx, argv[0], tbl->tableInfo.cur_size, index,
-                                "Table.set", exception)) {
+        if (!ValidateTableIndex(ctx, argv[0], tbl->tableInfo.cur_size, index, "Table.set", exception)) {
             return JSValueMakeUndefined(ctx);
         }
 
@@ -711,7 +706,6 @@ namespace PrismaUI::WASM {
         // which is not straightforward. For now, only null is supported to match
         // the common use case of clearing table entries.
         if (argc < 2 || JSValueIsNull(ctx, argv[1]) || JSValueIsUndefined(ctx, argv[1])) {
-            // [065] Use kNullRef (0xFFFFFFFF) — the same sentinel Table.grow uses for new entries
             constexpr uint32_t kNullRef = 0xFFFFFFFFu;
             if (tbl->tableInfo.elems) {
                 auto* elems = static_cast<uint32_t*>(tbl->tableInfo.elems);
@@ -723,8 +717,7 @@ namespace PrismaUI::WASM {
         // For non-null values, we can't easily convert a JS function back to a WASM
         // function index. Log a warning.
         logger::warn("[WASM] Table.set: setting non-null values is not yet supported");
-        JSStringRef errStr = JSStringCreateWithUTF8CString(
-            "Table.set: only null values are currently supported");
+        JSStringRef errStr = JSStringCreateWithUTF8CString("Table.set: only null values are currently supported");
         JSValueRef errVal = JSValueMakeString(ctx, errStr);
         JSStringRelease(errStr);
         *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -733,9 +726,8 @@ namespace PrismaUI::WASM {
 
     // --- Table.prototype.grow(delta) -> oldLength ---
 
-    static JSValueRef WASM_TableGrow(JSContextRef ctx, JSObjectRef /*function*/,
-                                      JSObjectRef thisObject, size_t argc,
-                                      const JSValueRef argv[], JSValueRef* exception) {
+    static JSValueRef WASM_TableGrow(JSContextRef ctx, JSObjectRef /*function*/, JSObjectRef thisObject, size_t argc,
+                                     const JSValueRef argv[], JSValueRef* exception) {
         auto* tbl = static_cast<WASMTableData*>(JSObjectGetPrivate(thisObject));
         if (!tbl || !tbl->moduleInst) {
             JSStringRef errStr = JSStringCreateWithUTF8CString("Table.grow: invalid table object");
@@ -753,11 +745,9 @@ namespace PrismaUI::WASM {
             return JSValueMakeUndefined(ctx);
         }
 
-        // [063] Validate delta before casting — negative wraps to huge uint32_t, NaN is UB
         double dDelta = JSValueToNumber(ctx, argv[0], nullptr);
         if (std::isnan(dDelta) || dDelta < 0.0 || dDelta > static_cast<double>(UINT32_MAX)) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "Table.grow: delta must be a non-negative integer");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("Table.grow: delta must be a non-negative integer");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -776,10 +766,8 @@ namespace PrismaUI::WASM {
             }
         }
 
-        // [063] Check for overflow before computing newSize
         if (delta > UINT32_MAX - oldSize) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "Table.grow: size overflow");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("Table.grow: size overflow");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -788,8 +776,7 @@ namespace PrismaUI::WASM {
         uint32_t newSize = oldSize + delta;
 
         if (tbl->tableInfo.max_size != UINT32_MAX && newSize > tbl->tableInfo.max_size) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "Table.grow: would exceed maximum table size");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("Table.grow: would exceed maximum table size");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -801,8 +788,7 @@ namespace PrismaUI::WASM {
         constexpr uintptr_t kNullRef = 0xFFFFFFFF;
         auto* internalInst = reinterpret_cast<WASMModuleInstance*>(tbl->moduleInst);
         if (!wasm_enlarge_table(internalInst, tbl->tableIndex, delta, kNullRef)) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "Table.grow: WAMR failed to enlarge table");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("Table.grow: WAMR failed to enlarge table");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -822,15 +808,12 @@ namespace PrismaUI::WASM {
         static JSClassRef cls = []() {
             static JSStaticValue kTableValues[] = {
                 {"length", WASM_TableGetLength, nullptr, kJSPropertyAttributeReadOnly | kJSPropertyAttributeDontDelete},
-                {nullptr, nullptr, nullptr, 0}
-            };
+                {nullptr, nullptr, nullptr, 0}};
 
-            static JSStaticFunction kTableFunctions[] = {
-                {"get", WASM_TableGet, kJSPropertyAttributeDontDelete},
-                {"set", WASM_TableSet, kJSPropertyAttributeDontDelete},
-                {"grow", WASM_TableGrow, kJSPropertyAttributeDontDelete},
-                {nullptr, nullptr, 0}
-            };
+            static JSStaticFunction kTableFunctions[] = {{"get", WASM_TableGet, kJSPropertyAttributeDontDelete},
+                                                         {"set", WASM_TableSet, kJSPropertyAttributeDontDelete},
+                                                         {"grow", WASM_TableGrow, kJSPropertyAttributeDontDelete},
+                                                         {nullptr, nullptr, 0}};
 
             JSClassDefinition def{};
             def.className = "WebAssembly.Table";
@@ -844,12 +827,10 @@ namespace PrismaUI::WASM {
 
     // --- WebAssembly.Table constructor ---
 
-    JSObjectRef WASM_TableConstructor(JSContextRef ctx, JSObjectRef /*constructor*/,
-                                      size_t argc, const JSValueRef argv[],
-                                      JSValueRef* exception) {
+    JSObjectRef WASM_TableConstructor(JSContextRef ctx, JSObjectRef /*constructor*/, size_t argc,
+                                      const JSValueRef argv[], JSValueRef* exception) {
         if (argc < 1 || !JSValueIsObject(ctx, argv[0])) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Table requires a descriptor object");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Table requires a descriptor object");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -864,8 +845,8 @@ namespace PrismaUI::WASM {
         JSStringRelease(elementProp);
 
         if (!JSValueIsString(ctx, elementVal)) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Table: 'element' is required and must be a string");
+            JSStringRef errStr =
+                JSStringCreateWithUTF8CString("WebAssembly.Table: 'element' is required and must be a string");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -880,8 +861,8 @@ namespace PrismaUI::WASM {
         elemType.resize(strlen(elemType.c_str()));
 
         if (elemType != "anyfunc" && elemType != "funcref") {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Table: 'element' must be 'anyfunc' or 'funcref'");
+            JSStringRef errStr =
+                JSStringCreateWithUTF8CString("WebAssembly.Table: 'element' must be 'anyfunc' or 'funcref'");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -894,15 +875,20 @@ namespace PrismaUI::WASM {
         JSStringRelease(initialProp);
 
         if (!JSValueIsNumber(ctx, initialVal)) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Table: 'initial' is required and must be a number");
+            JSStringRef errStr =
+                JSStringCreateWithUTF8CString("WebAssembly.Table: 'initial' is required and must be a number");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
             return JSObjectMake(ctx, nullptr, nullptr);
         }
 
-        uint32_t initial = static_cast<uint32_t>(JSValueToNumber(ctx, initialVal, nullptr));
+        uint32_t initial;
+        {
+            double raw = JSValueToNumber(ctx, initialVal, nullptr);
+            if (!ValidateUint32(ctx, raw, UINT32_MAX, "Table", "initial", &initial, exception))
+                return JSObjectMake(ctx, nullptr, nullptr);
+        }
 
         // Read 'maximum' (optional)
         uint32_t maximum = UINT32_MAX;
@@ -911,12 +897,14 @@ namespace PrismaUI::WASM {
         JSStringRelease(maximumProp);
 
         if (JSValueIsNumber(ctx, maximumVal)) {
-            maximum = static_cast<uint32_t>(JSValueToNumber(ctx, maximumVal, nullptr));
+            double raw = JSValueToNumber(ctx, maximumVal, nullptr);
+            if (!ValidateUint32(ctx, raw, UINT32_MAX, "Table", "maximum", &maximum, exception))
+                return JSObjectMake(ctx, nullptr, nullptr);
         }
 
         if (initial > maximum) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Table: 'initial' must not exceed 'maximum'");
+            JSStringRef errStr =
+                JSStringCreateWithUTF8CString("WebAssembly.Table: 'initial' must not exceed 'maximum'");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -924,8 +912,7 @@ namespace PrismaUI::WASM {
         }
 
         if (!EnsureRuntimeInitialized()) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Table: failed to initialize WASM runtime");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Table: failed to initialize WASM runtime");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -961,8 +948,8 @@ namespace PrismaUI::WASM {
                     tblSection.push_back(byte);
                 } while (val != 0);
             };
-            emitLEB(1);                    // count: 1 table
-            tblSection.push_back(0x70);    // element type: funcref
+            emitLEB(1);                  // count: 1 table
+            tblSection.push_back(0x70);  // element type: funcref
             if (maximum != UINT32_MAX) {
                 tblSection.push_back(0x01);  // flags: has_max
                 emitLEB(initial);
@@ -1000,9 +987,8 @@ namespace PrismaUI::WASM {
         }
 
         char errorBuf[128] = {};
-        wasm_module_t miniModule = wasm_runtime_load(
-            wasmBytes.data(), static_cast<uint32_t>(wasmBytes.size()),
-            errorBuf, sizeof(errorBuf));
+        wasm_module_t miniModule =
+            wasm_runtime_load(wasmBytes.data(), static_cast<uint32_t>(wasmBytes.size()), errorBuf, sizeof(errorBuf));
 
         if (!miniModule) {
             std::string errMsg = "WebAssembly.Table: internal module load failed: ";
@@ -1016,8 +1002,7 @@ namespace PrismaUI::WASM {
             return JSObjectMake(ctx, nullptr, nullptr);
         }
 
-        wasm_module_inst_t miniInst = wasm_runtime_instantiate(
-            miniModule, 4096, 0, errorBuf, sizeof(errorBuf));
+        wasm_module_inst_t miniInst = wasm_runtime_instantiate(miniModule, 4096, 0, errorBuf, sizeof(errorBuf));
 
         if (!miniInst) {
             std::string errMsg = "WebAssembly.Table: internal instantiation failed: ";
@@ -1038,15 +1023,13 @@ namespace PrismaUI::WASM {
             wasm_runtime_deinstantiate(miniInst);
             wasm_runtime_unload(miniModule);
 
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Table: failed to create table");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Table: failed to create table");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
             return JSObjectMake(ctx, nullptr, nullptr);
         }
 
-        // [061] Store ctx for finalizer use and miniModule for cleanup
         auto* tblData = new WASMTableData{miniInst, tableInfo, 0, nullptr, true, ctx, nullptr, miniModule};
 
         AddLiveObject();
@@ -1059,12 +1042,9 @@ namespace PrismaUI::WASM {
 
     // --- WrapTableExport ---
 
-    JSObjectRef WrapTableExport(JSContextRef ctx, wasm_module_inst_t moduleInst,
-                                const wasm_table_inst_t& tableInfo, uint32_t tableIndex,
-                                wasm_exec_env_t execEnv,
-                                JSObjectRef instanceObj) {
-        auto* tblData = new WASMTableData{moduleInst, tableInfo, tableIndex, execEnv, false,
-                                          ctx, instanceObj};
+    JSObjectRef WrapTableExport(JSContextRef ctx, wasm_module_inst_t moduleInst, const wasm_table_inst_t& tableInfo,
+                                uint32_t tableIndex, wasm_exec_env_t execEnv, JSObjectRef instanceObj) {
+        auto* tblData = new WASMTableData{moduleInst, tableInfo, tableIndex, execEnv, false, ctx, instanceObj};
         if (instanceObj) {
             JSValueProtect(ctx, instanceObj);
         }
@@ -1158,7 +1138,8 @@ namespace PrismaUI::WASM {
     // --- Global.prototype.value (getter) ---
 
     static JSValueRef WASM_GlobalGetValue(JSContextRef ctx, JSObjectRef object,
-                                           JSStringRef /*propertyName*/, JSValueRef* /*exception*/) {
+                                          [[maybe_unused]] JSStringRef propertyName,
+                                          [[maybe_unused]] JSValueRef* exception) {
         auto* g = static_cast<WASMGlobalData*>(JSObjectGetPrivate(object));
         if (!g) return JSValueMakeUndefined(ctx);
         return ReadGlobalValue(ctx, g);
@@ -1166,15 +1147,13 @@ namespace PrismaUI::WASM {
 
     // --- Global.prototype.value (setter) ---
 
-    static bool WASM_GlobalSetValue(JSContextRef ctx, JSObjectRef object,
-                                     JSStringRef /*propertyName*/, JSValueRef value,
-                                     JSValueRef* exception) {
+    static bool WASM_GlobalSetValue(JSContextRef ctx, JSObjectRef object, [[maybe_unused]] JSStringRef propertyName,
+                                    JSValueRef value, [[maybe_unused]] JSValueRef* exception) {
         auto* g = static_cast<WASMGlobalData*>(JSObjectGetPrivate(object));
         if (!g) return false;
 
         if (!g->globalInfo.is_mutable) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "Global.value: cannot set value of immutable global");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("Global.value: cannot set value of immutable global");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -1190,8 +1169,7 @@ namespace PrismaUI::WASM {
         static JSClassRef cls = []() {
             static JSStaticValue kGlobalValues[] = {
                 {"value", WASM_GlobalGetValue, WASM_GlobalSetValue, kJSPropertyAttributeDontDelete},
-                {nullptr, nullptr, nullptr, 0}
-            };
+                {nullptr, nullptr, nullptr, 0}};
 
             JSClassDefinition def{};
             def.className = "WebAssembly.Global";
@@ -1204,12 +1182,10 @@ namespace PrismaUI::WASM {
 
     // --- WebAssembly.Global constructor ---
 
-    JSObjectRef WASM_GlobalConstructor(JSContextRef ctx, JSObjectRef /*constructor*/,
-                                       size_t argc, const JSValueRef argv[],
-                                       JSValueRef* exception) {
+    JSObjectRef WASM_GlobalConstructor(JSContextRef ctx, [[maybe_unused]] JSObjectRef constructor, size_t argc,
+                                       const JSValueRef argv[], JSValueRef* exception) {
         if (argc < 1 || !JSValueIsObject(ctx, argv[0])) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Global requires a descriptor object");
+            JSStringRef errStr = JSStringCreateWithUTF8CString("WebAssembly.Global requires a descriptor object");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -1224,8 +1200,8 @@ namespace PrismaUI::WASM {
         JSStringRelease(valueProp);
 
         if (!JSValueIsString(ctx, valueTypeVal)) {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Global: 'value' type is required and must be a string");
+            JSStringRef errStr =
+                JSStringCreateWithUTF8CString("WebAssembly.Global: 'value' type is required and must be a string");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -1240,13 +1216,17 @@ namespace PrismaUI::WASM {
         valueType.resize(strlen(valueType.c_str()));
 
         wasm_valkind_t kind;
-        if (valueType == "i32") kind = WASM_I32;
-        else if (valueType == "i64") kind = WASM_I64;
-        else if (valueType == "f32") kind = WASM_F32;
-        else if (valueType == "f64") kind = WASM_F64;
+        if (valueType == "i32")
+            kind = WASM_I32;
+        else if (valueType == "i64")
+            kind = WASM_I64;
+        else if (valueType == "f32")
+            kind = WASM_F32;
+        else if (valueType == "f64")
+            kind = WASM_F64;
         else {
-            JSStringRef errStr = JSStringCreateWithUTF8CString(
-                "WebAssembly.Global: 'value' must be 'i32', 'i64', 'f32', or 'f64'");
+            JSStringRef errStr =
+                JSStringCreateWithUTF8CString("WebAssembly.Global: 'value' must be 'i32', 'i64', 'f32', or 'f64'");
             JSValueRef errVal = JSValueMakeString(ctx, errStr);
             JSStringRelease(errStr);
             *exception = JSObjectMakeError(ctx, 1, &errVal, nullptr);
@@ -1284,8 +1264,7 @@ namespace PrismaUI::WASM {
 
     // --- WrapGlobalExport ---
 
-    JSObjectRef WrapGlobalExport(JSContextRef ctx, const wasm_global_inst_t& globalInfo,
-                                  JSObjectRef instanceObj) {
+    JSObjectRef WrapGlobalExport(JSContextRef ctx, const wasm_global_inst_t& globalInfo, JSObjectRef instanceObj) {
         auto* globalData = new WASMGlobalData{};
         globalData->globalInfo = globalInfo;
         globalData->ownsGlobal = false;

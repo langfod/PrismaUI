@@ -438,12 +438,6 @@ namespace PrismaUI::Core {
 
                 if (localRenderer) {
                     localRenderer->Update();
-
-                    // Restore D3D11 render targets after WebGL/ANGLE may have
-                    // changed them during Update().  Must happen before Render()
-                    // which needs Ultralight's GPU driver state intact.
-                    WebGL::EndFrameGLState();
-
                     localRenderer->RefreshDisplay(0);
                     localRenderer->Render();
                 }

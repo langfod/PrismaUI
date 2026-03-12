@@ -63,8 +63,10 @@ namespace PrismaUI::SIMD::SSE2 {
     // SSSE3 RGBA->BGRA swizzle + vertical flip.
     // Runtime dispatch only selects this when SSSE3 is confirmed available.
     void SwizzleFlipPixels(void* dest, const void* src, uint32_t width, uint32_t height) {
-        // [096] In-place operation corrupts data (top rows overwritten before read).
-        assert(dest != src && "SwizzleFlipPixels does not support in-place operation");
+        if (dest == src) {
+            logger::error("SwizzleFlipPixels: in-place operation not supported");
+            return;
+        }
         const size_t rowBytes = static_cast<size_t>(width) * 4;
         auto* srcBytes = static_cast<const uint8_t*>(src);
         auto* dstBytes = static_cast<uint8_t*>(dest);

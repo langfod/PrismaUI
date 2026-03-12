@@ -1,13 +1,14 @@
-#include "WebGLBridgeInternal.h"
+#include <d3d11.h>
+#include <spdlog/spdlog.h>
+
+#include <chrono>
+#include <vector>
 
 #include "ANGLEContext.h"
 #include "PrismaUI/Core.h"
 #include "Utils/SIMDDispatch.h"
+#include "WebGLBridgeInternal.h"
 
-#include <d3d11.h>
-#include <spdlog/spdlog.h>
-#include <vector>
-#include <chrono>
 
 namespace PrismaUI::WebGL {
 
@@ -21,9 +22,6 @@ namespace PrismaUI::WebGL {
     // nullptr at frame start (cleared by ResetFrameState).  Comparing by
     // pointer avoids redundant eglMakeCurrent calls on single-canvas frames
     // while correctly switching when multiple canvases interleave GL calls.
-    //
-    // Since ANGLE has its own D3D11 device, we no longer need to save/restore
-    // Skyrim's D3D11 render targets — the two devices are independent.
     // =========================================================================
     thread_local ANGLEContext* g_currentContext = nullptr;
 
@@ -45,7 +43,8 @@ namespace PrismaUI::WebGL {
                     static uint32_t droppedFrames = 0;
                     ++droppedFrames;
                     uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
-                        std::chrono::steady_clock::now().time_since_epoch()).count();
+                                       std::chrono::steady_clock::now().time_since_epoch())
+                                       .count();
                     if (now - lastLog > 5000) {
                         logger::warn("[WebGL] ANGLE keyed mutex acquire failed: 0x{:X} ({} dropped frames total)",
                                      static_cast<uint32_t>(hr), droppedFrames);
@@ -53,19 +52,15 @@ namespace PrismaUI::WebGL {
                     }
                 }
             }
-            eglMakeCurrent(c->eglDisplay, c->eglSurface, c->eglSurface, c->eglContext);
+            if (!eglMakeCurrent(c->eglDisplay, c->eglSurface, c->eglSurface, c->eglContext)) {
+                logger::error("[WebGL] eglMakeCurrent failed: 0x{:X}", eglGetError());
+                return;
+            }
             g_currentContext = c;
         }
     }
 
-    void ResetFrameState() {
-        g_currentContext = nullptr;
-    }
-
-    void EndFrameGLState() {
-        // No-op: ANGLE has its own D3D11 device, so no state restoration needed.
-        // Kept for API compatibility with Core.cpp.
-    }
+    void ResetFrameState() { g_currentContext = nullptr; }
 
     // =========================================================================
     // Helper: extract ANGLEContext from JSC thisObject's private data.
@@ -90,7 +85,8 @@ namespace PrismaUI::WebGL {
         if (!c->sharedTexture) {
             static uint64_t lastLog = 0;
             uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count();
+                               std::chrono::steady_clock::now().time_since_epoch())
+                               .count();
             if (now - lastLog > 5000) {
                 logger::debug("[WebGL-DBG] ReadbackToSharedTexture: sharedTexture is null");
                 lastLog = now;
@@ -122,7 +118,7 @@ namespace PrismaUI::WebGL {
             auto px = [&](uint32_t x, uint32_t y) -> std::string {
                 uint32_t idx = (y * w + x) * 4;
                 if (idx + 3 < requiredBytes)
-                    return fmt::format("({},{},{},{})", pixels[idx], pixels[idx+1], pixels[idx+2], pixels[idx+3]);
+                    return fmt::format("({},{},{},{})", pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3]);
                 return "(OOB)";
             };
 
@@ -142,7 +138,8 @@ namespace PrismaUI::WebGL {
         if (!d3dCtx) {
             static uint64_t lastLog = 0;
             uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now().time_since_epoch()).count();
+                               std::chrono::steady_clock::now().time_since_epoch())
+                               .count();
             if (now - lastLog > 5000) {
                 logger::debug("[WebGL-DBG] ReadbackToSharedTexture: d3dContext is null — pixels lost!");
                 lastLog = now;
@@ -158,19 +155,19 @@ namespace PrismaUI::WebGL {
         static bool loggedOnce = false;
         if (!loggedOnce) {
             loggedOnce = true;
-            logger::info("[WebGL-DBG] ReadbackToSharedTexture: first successful readback {}x{}, rowPitch={}", w, h, rowBytes);
+            logger::info("[WebGL-DBG] ReadbackToSharedTexture: first successful readback {}x{}, rowPitch={}", w, h,
+                         rowBytes);
 
             // Verify the shared texture dimensions match
             D3D11_TEXTURE2D_DESC desc = {};
             c->sharedTexture->GetDesc(&desc);
-            logger::info("[WebGL-DBG] SharedTexture desc: {}x{} format={} usage={} bindFlags=0x{:X}",
-                desc.Width, desc.Height, static_cast<int>(desc.Format),
-                static_cast<int>(desc.Usage), desc.BindFlags);
+            logger::info("[WebGL-DBG] SharedTexture desc: {}x{} format={} usage={} bindFlags=0x{:X}", desc.Width,
+                         desc.Height, static_cast<int>(desc.Format), static_cast<int>(desc.Usage), desc.BindFlags);
 
             // Check a pixel in the flipped/swizzled buffer
             if (requiredBytes >= 4) {
-                logger::info("[WebGL-DBG] Flipped buffer[0..3] (BGRA): {},{},{},{}",
-                    flipped[0], flipped[1], flipped[2], flipped[3]);
+                logger::info("[WebGL-DBG] Flipped buffer[0..3] (BGRA): {},{},{},{}", flipped[0], flipped[1], flipped[2],
+                             flipped[3]);
             }
 
             // Log GL viewport
@@ -186,11 +183,11 @@ namespace PrismaUI::WebGL {
             auto px = [&](uint32_t px, uint32_t py) -> std::string {
                 uint32_t idx = (py * w + px) * 4;
                 if (idx + 3 < requiredBytes)
-                    return fmt::format("({},{},{},{})", pixels[idx], pixels[idx+1], pixels[idx+2], pixels[idx+3]);
+                    return fmt::format("({},{},{},{})", pixels[idx], pixels[idx + 1], pixels[idx + 2], pixels[idx + 3]);
                 return "(OOB)";
             };
-            logger::info("[WebGL-DBG] Readback frame 30 pixels (RGBA): [0,0]={} [80,72]={} [{},{}]={}",
-                px(0, 0), px(80, 72), w/2, h/2, px(w/2, h/2));
+            logger::info("[WebGL-DBG] Readback frame 30 pixels (RGBA): [0,0]={} [80,72]={} [{},{}]={}", px(0, 0),
+                         px(80, 72), w / 2, h / 2, px(w / 2, h / 2));
         }
     }
 
@@ -199,10 +196,10 @@ namespace PrismaUI::WebGL {
     // Called once per frame from Core.cpp after renderer->Render() and before
     // the render thread composites.
     //
-    // Shared texture path:  glFlush → release ANGLE keyed mutex (key 1)
+    // Shared texture path:  glFlush then release ANGLE keyed mutex (key 1)
     //   so the render thread can acquire it for reading.
     //
-    // CPU readback fallback: glFlush → glReadPixels → swizzle → UpdateSubresource.
+    // CPU readback fallback: glFlush then glReadPixels then swizzle then UpdateSubresource.
     // =========================================================================
     void FlushDirtyContexts() {
         for (ANGLEContext* c : GetActiveContexts()) {

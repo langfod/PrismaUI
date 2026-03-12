@@ -347,8 +347,9 @@ namespace PrismaUI::ViewRenderer {
             spriteBatch->Begin(DirectX::SpriteSortMode_Deferred, commonStates->NonPremultiplied());
 
             for (const auto& viewData : viewsToDraw) {
-                if (viewData && viewData->webglContext.load(std::memory_order_relaxed) &&
-                    failedContexts.count(viewData->webglContext.load(std::memory_order_relaxed))) {
+                if (!viewData) continue;
+                auto* ctx = viewData->webglContext.load(std::memory_order_acquire);
+                if (ctx && failedContexts.count(ctx)) {
                     continue;
                 }
                 DrawWebGLOverlay(viewData);
@@ -445,7 +446,7 @@ namespace PrismaUI::ViewRenderer {
             return;
         }
 
-        if (!webgl->visible) {
+        if (!webgl->visible.load(std::memory_order_relaxed)) {
             static uint64_t lastVisLog = 0;
             uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -456,15 +457,22 @@ namespace PrismaUI::ViewRenderer {
             return;
         }
 
+        // Snapshot atomic fields once for a consistent view throughout this function
+        float cx = webgl->canvasX.load(std::memory_order_relaxed);
+        float cy = webgl->canvasY.load(std::memory_order_relaxed);
+        float dw = webgl->displayWidth.load(std::memory_order_relaxed);
+        float dh = webgl->displayHeight.load(std::memory_order_relaxed);
+        uint64_t lastUpdate = webgl->lastUpdateMs.load(std::memory_order_relaxed);
+
         uint64_t nowMs = static_cast<uint64_t>(
             std::chrono::duration_cast<std::chrono::milliseconds>(
                 std::chrono::steady_clock::now().time_since_epoch())
                 .count());
-        if (webgl->lastUpdateMs != 0 && nowMs - webgl->lastUpdateMs > 1500) {
+        if (lastUpdate != 0 && nowMs - lastUpdate > 1500) {
             static uint64_t lastStaleLog = 0;
             if (nowMs - lastStaleLog > 5000) {
                 logger::debug("[WebGL-DBG] DrawWebGLOverlay: stale — lastUpdateMs={}, now={}, delta={}ms",
-                    webgl->lastUpdateMs, nowMs, nowMs - webgl->lastUpdateMs);
+                    lastUpdate, nowMs, nowMs - lastUpdate);
                 lastStaleLog = nowMs;
             }
             return;
@@ -490,29 +498,29 @@ namespace PrismaUI::ViewRenderer {
                 vp.TopLeftX, vp.TopLeftY, vp.Width, vp.Height, vp.TopLeftX, vp.TopLeftY);
             logger::info("[WebGL-DBG] DrawWebGLOverlay: screenSize={}x{}", Core::screenSize.width, Core::screenSize.height);
             logger::info("[WebGL-DBG] DrawWebGLOverlay: webgl pos=({},{}) bufSize={}x{} displaySize={}x{} sharedSRV={}",
-                webgl->canvasX, webgl->canvasY, webgl->canvasWidth, webgl->canvasHeight,
-                webgl->displayWidth, webgl->displayHeight,
+                cx, cy, webgl->canvasWidth, webgl->canvasHeight,
+                dw, dh,
                 static_cast<void*>(webgl->sharedSRV.Get()));
         }
 
-        DirectX::SimpleMath::Vector2 webglPos(webgl->canvasX, webgl->canvasY);
+        DirectX::SimpleMath::Vector2 webglPos(cx, cy);
         RECT webglSourceRect = {0, 0, (long)webgl->canvasWidth, (long)webgl->canvasHeight};
 
         // Compute scale factor: display size may differ from buffer size
         // (e.g. CSS object-fit: contain scales a 300x150 canvas to fill the viewport).
         float scaleX = 1.0f;
         float scaleY = 1.0f;
-        if (webgl->displayWidth > 0 && webgl->displayHeight > 0 &&
+        if (dw > 0 && dh > 0 &&
             webgl->canvasWidth > 0 && webgl->canvasHeight > 0) {
-            scaleX = webgl->displayWidth / static_cast<float>(webgl->canvasWidth);
-            scaleY = webgl->displayHeight / static_cast<float>(webgl->canvasHeight);
+            scaleX = dw / static_cast<float>(webgl->canvasWidth);
+            scaleY = dh / static_cast<float>(webgl->canvasHeight);
         }
 
         if (nowMs - lastDrawLog > 5000) {
             logger::debug("[WebGL-DBG] DrawWebGLOverlay: DRAWING at ({},{}) buf {}x{} display {}x{} scale({:.2f},{:.2f}), lastUpdate={}ms ago",
-                webgl->canvasX, webgl->canvasY, webgl->canvasWidth, webgl->canvasHeight,
-                webgl->displayWidth, webgl->displayHeight, scaleX, scaleY,
-                nowMs - webgl->lastUpdateMs);
+                cx, cy, webgl->canvasWidth, webgl->canvasHeight,
+                dw, dh, scaleX, scaleY,
+                nowMs - lastUpdate);
             lastDrawLog = nowMs;
         }
 

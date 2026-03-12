@@ -83,7 +83,8 @@
         this._endedCheckInterval = setInterval(function() {
             for (var i = self._activeSources.length - 1; i >= 0; i--) {
                 var entry = self._activeSources[i];
-                if (entry.nativeNode && entry.nativeNode.ended) {
+                // [A7] Also remove stopped entries to prevent leak for looped/stopped sources
+                if (entry._stopped || (entry.nativeNode && entry.nativeNode.ended)) {
                     self._activeSources.splice(i, 1);
                     if (typeof entry.onended === 'function') {
                         try { entry.onended(); } catch(e) {}
@@ -133,7 +134,8 @@
 
         // Wrap start() to track active sources for onended polling
         var origStart = nativeNode.start.bind(nativeNode);
-        var entry = { nativeNode: nativeNode, onended: null };
+        var origStop = nativeNode.stop.bind(nativeNode);
+        var entry = { nativeNode: nativeNode, onended: null, _stopped: false };
 
         nativeNode.start = function(when, offset, duration) {
             if (duration !== undefined && duration !== null && duration >= 0) {
@@ -142,6 +144,12 @@
                 origStart(when || 0, offset || 0);
             }
             self._activeSources.push(entry);
+        };
+
+        // [A7] Track stop() so cleanup interval removes stopped/looped sources
+        nativeNode.stop = function(when) {
+            entry._stopped = true;
+            origStop(when || 0);
         };
 
         // Allow setting onended
@@ -268,7 +276,7 @@
     function PrismaAudio(src) {
         this.src = src || '';
         this._volume = 1.0;
-        this.currentTime = 0;
+        this._currentTime = 0;
         this.duration = 0;
         this.paused = true;
         this.ended = false;
@@ -286,6 +294,7 @@
         this._ctx = null;
         this._playbackOffset = 0;
         this._playbackStartedAt = 0;
+        this._abortController = null;  // [A8] For cancelling in-flight fetches
     }
 
     Object.defineProperty(PrismaAudio.prototype, 'volume', {
@@ -295,6 +304,19 @@
             if (this._gainNode) {
                 this._gainNode.gain.value = this.muted ? 0 : this._volume;
             }
+        }
+    });
+
+    // [A6] currentTime reflects live playback position instead of being a static property
+    Object.defineProperty(PrismaAudio.prototype, 'currentTime', {
+        get: function() {
+            if (!this.paused && this._playbackStartedAt > 0 && this._ctx) {
+                return this._playbackOffset + (this._ctx.currentTime - this._playbackStartedAt);
+            }
+            return this._currentTime;
+        },
+        set: function(v) {
+            this._currentTime = v;
         }
     });
 
@@ -317,13 +339,25 @@
     };
 
     PrismaAudio.prototype.load = function() {
-        if (this._loading || this._loaded || !this.src) return;
+        if (!this.src) return;
+
+        // [A8] Abort any in-flight fetch to prevent stale data overwriting _buffer
+        if (this._abortController) {
+            this._abortController.abort();
+            this._abortController = null;
+        }
+
+        if (this._loaded && !this._loading) return;
         this._loading = true;
+        this._loaded = false;
         var self = this;
         var ctx = getDefaultAudioContext();
         if (!ctx) { this._loading = false; return; }
 
-        fetch(this.src)
+        var controller = new AbortController();
+        this._abortController = controller;
+
+        fetch(this.src, { signal: controller.signal })
             .then(function(resp) {
                 if (!resp.ok) throw new Error('HTTP ' + resp.status);
                 return resp.arrayBuffer();
@@ -332,6 +366,7 @@
                 return ctx.decodeAudioData(ab);
             })
             .then(function(buffer) {
+                if (controller.signal.aborted) return;
                 self._buffer = buffer;
                 self.duration = buffer.duration;
                 self._loaded = true;
@@ -342,6 +377,7 @@
                 if (self.autoplay) self.play();
             })
             .catch(function(e) {
+                if (e.name === 'AbortError') return;
                 self._loading = false;
                 console.error('[Audio] Failed to load: ' + self.src, e);
                 self._emit('error');

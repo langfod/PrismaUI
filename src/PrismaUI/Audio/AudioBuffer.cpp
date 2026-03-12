@@ -1,16 +1,18 @@
 #include "AudioBuffer.h"
 
 #include <miniaudio.h>
+
 #include <cstring>
+
 
 namespace logger = SKSE::log;
 
 namespace PrismaUI::Audio {
 
-    AudioBuffer* CreateBuffer(uint32_t numChannels, uint32_t length, float sampleRate) {
+    std::unique_ptr<AudioBuffer> CreateBuffer(uint32_t numChannels, uint32_t length, float sampleRate) {
         if (numChannels == 0 || length == 0 || sampleRate <= 0.0f) return nullptr;
 
-        auto* buf = new AudioBuffer();
+        auto buf = std::make_unique<AudioBuffer>();
         buf->numberOfChannels = numChannels;
         buf->length = length;
         buf->sampleRate = sampleRate;
@@ -24,15 +26,13 @@ namespace PrismaUI::Audio {
         return buf;
     }
 
-    AudioBuffer* DecodeFromMemory(const uint8_t* data, size_t dataSize, float targetSampleRate) {
+    std::unique_ptr<AudioBuffer> DecodeFromMemory(const uint8_t* data, size_t dataSize, float targetSampleRate) {
         if (!data || dataSize == 0 || targetSampleRate <= 0.0f) return nullptr;
 
         ma_decoder decoder;
-        ma_decoder_config decoderConfig = ma_decoder_config_init(
-            ma_format_f32,
-            0,  // 0 = preserve source channel count
-            static_cast<ma_uint32>(targetSampleRate)
-        );
+        ma_decoder_config decoderConfig = ma_decoder_config_init(ma_format_f32,
+                                                                 0,  // 0 = preserve source channel count
+                                                                 static_cast<ma_uint32>(targetSampleRate));
 
         ma_result result = ma_decoder_init_memory(data, dataSize, &decoderConfig, &decoder);
         if (result != MA_SUCCESS) {
@@ -40,7 +40,13 @@ namespace PrismaUI::Audio {
             return nullptr;
         }
 
-        // Get total frame count (may require a full scan for some formats)
+        struct DecoderGuard {
+            ma_decoder* d;
+            ~DecoderGuard() {
+                if (d) ma_decoder_uninit(d);
+            }
+        } guard{&decoder};
+
         ma_uint64 totalFrames = 0;
         result = ma_decoder_get_length_in_pcm_frames(&decoder, &totalFrames);
         if (result != MA_SUCCESS || totalFrames == 0) {
@@ -67,8 +73,6 @@ namespace PrismaUI::Audio {
             if (result != MA_SUCCESS) break;
         }
 
-        ma_decoder_uninit(&decoder);
-
         if (interleavedData.empty()) {
             logger::error("[Audio] Decoded zero frames from audio data");
             return nullptr;
@@ -76,8 +80,13 @@ namespace PrismaUI::Audio {
 
         totalFrames = interleavedData.size() / channels;
 
+        if (totalFrames > UINT32_MAX) {
+            logger::error("[Audio] Audio too large: {} frames exceeds uint32_t", totalFrames);
+            return nullptr;
+        }
+
         // De-interleave into per-channel vectors
-        auto* buf = new AudioBuffer();
+        auto buf = std::make_unique<AudioBuffer>();
         buf->numberOfChannels = channels;
         buf->length = static_cast<uint32_t>(totalFrames);
         buf->sampleRate = targetSampleRate;
@@ -87,13 +96,12 @@ namespace PrismaUI::Audio {
         for (uint32_t ch = 0; ch < channels; ++ch) {
             buf->channelData[ch].resize(static_cast<size_t>(totalFrames));
             for (uint64_t i = 0; i < totalFrames; ++i) {
-                buf->channelData[ch][static_cast<size_t>(i)] =
-                    interleavedData[static_cast<size_t>(i * channels + ch)];
+                buf->channelData[ch][static_cast<size_t>(i)] = interleavedData[static_cast<size_t>(i * channels + ch)];
             }
         }
 
-        logger::info("[Audio] Decoded audio: {}ch, {} frames, {}Hz, {:.2f}s",
-                     channels, totalFrames, targetSampleRate, buf->duration);
+        logger::info("[Audio] Decoded audio: {}ch, {} frames, {}Hz, {:.2f}s", channels, totalFrames, targetSampleRate,
+                     buf->duration);
 
         return buf;
     }

@@ -96,6 +96,9 @@ namespace PrismaUI::ViewManager {
         }
 
         PrismaUI::InputHandler::DisableInputCapture(viewId);
+        if (closeFocusMenu) {
+            PrismaUI::InputHandler::ClearImeState(viewId);
+        }
         viewData->ultralightView->Unfocus();
 
         if (closeFocusMenu) {

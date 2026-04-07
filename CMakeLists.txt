@@ -112,6 +112,7 @@ target_link_libraries(${PROJECT_NAME}
     UltralightCore
     WebCore
     comctl32  # Required for SetWindowSubclass/RemoveWindowSubclass
+    imm32     # Required for IME (Input Method Editor) support
 )
 
 # Find and link cpuinfo for runtime SIMD detection

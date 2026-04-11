@@ -1,15 +1,28 @@
 ﻿#include "ViewManager.h"
 
 #include "Core.h"
+#include "Audio/AudioContext.h"
 #include "InputHandler.h"
 #include "Inspector.h"
 #include "Listeners.h"
 #include "ViewOperationQueue.h"
+#include "WASM/WASMRuntime.h"
+#include "WebGL/ANGLEContext.h"
 
 namespace PrismaUI::ViewManager {
     using namespace Core;
 
+    // Cached focus state — updated by Focus/Unfocus on the ultralight thread,
+    // read lock-free by HasAnyActiveFocus (Scaleform AdvanceMovie_Hook).
+    static std::atomic<bool> g_anyViewHasFocus{false};
+
     Core::PrismaViewId Create(const std::string& htmlPath, std::function<void(Core::PrismaViewId)> onDomReadyCallback) {
+        return Create(htmlPath, Acceleration::Default, std::move(onDomReadyCallback));
+    }
+
+    Core::PrismaViewId Create(const std::string& htmlPath, Acceleration accel,
+                              std::function<void(Core::PrismaViewId)> onDomReadyCallback) {
+        bool isAccelerated = (accel == Acceleration::Accelerated);
         bool expected_init = false;
         if (coreInitialized.compare_exchange_strong(expected_init, true)) {
             Core::InitializeCoreSystem();
@@ -38,8 +51,9 @@ namespace PrismaUI::ViewManager {
         viewData->ultralightView = nullptr;
         viewData->htmlPathToLoad = fileUrl;
         viewData->originalUrl = fileUrl;  // Store for recovery after exceptions
+        viewData->isAccelerated = isAccelerated;
         viewData->isHidden = false;
-        viewData->domReadyCallback = onDomReadyCallback;
+        viewData->domReadyCallback = std::move(onDomReadyCallback);
 
         {
             std::unique_lock lock(viewsMutex);
@@ -58,8 +72,9 @@ namespace PrismaUI::ViewManager {
         }
 
         logger::info(
-            "View [{}] creation requested for path: {} with order <{}>. Actual view will be created by UI thread.",
-            newViewId, fileUrl, viewData->order);
+            "View [{}] creation requested for path: {} with order <{}>, accelerated={}. Actual view will be created by "
+            "UI thread.",
+            newViewId, fileUrl, viewData->order, isAccelerated);
 
         return newViewId;
     }
@@ -87,8 +102,12 @@ namespace PrismaUI::ViewManager {
         viewData->ultralightView->Unfocus();
 
         if (closeFocusMenu) {
+            // Full unfocus — no other view is taking focus, safe to clear
+            g_anyViewHasFocus.store(false, std::memory_order_release);
             FocusMenu::Close();
         }
+        // When closeFocusMenu==false we are switching focus between views;
+        // the new view already set g_anyViewHasFocus=true, don't clobber it.
 
         auto controlMap = RE::ControlMap::GetSingleton();
         controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kWheelZoom, true, false);
@@ -240,6 +259,7 @@ namespace PrismaUI::ViewManager {
 
             // Focus this view
             viewData->ultralightView->Focus();
+            g_anyViewHasFocus.store(true, std::memory_order_release);
             PrismaUI::InputHandler::EnableInputCapture(viewId);
 
             if (!disableFocusMenu) {
@@ -288,6 +308,7 @@ namespace PrismaUI::ViewManager {
 
             if (!viewData) {
                 logger::warn("Unfocus: View [{}] not found during operation execution.", viewId);
+                g_anyViewHasFocus.store(false, std::memory_order_release);
                 PrismaUI::InputHandler::DisableInputCapture(0);
                 FocusMenu::Close();
                 return;
@@ -302,6 +323,7 @@ namespace PrismaUI::ViewManager {
                     }
                     viewData->isPaused.store(false);
                 }
+                g_anyViewHasFocus.store(false, std::memory_order_release);
                 PrismaUI::InputHandler::DisableInputCapture(viewId);
                 FocusMenu::Close();
                 return;
@@ -328,10 +350,15 @@ namespace PrismaUI::ViewManager {
         }
 
         if (viewData) {
-            auto future = ultralightThread.submit(
-                [view_ptr = viewData->ultralightView]() -> bool { return view_ptr ? view_ptr->HasFocus() : false; });
+            auto checkFocus = [view_ptr = viewData->ultralightView]() -> bool {
+                return view_ptr ? view_ptr->HasFocus() : false;
+            };
+            if (ultralightThread.IsWorkerThread()) {
+                return checkFocus();
+            }
+            auto future = ultralightThread.submit(std::move(checkFocus));
             try {
-                return future.get();
+                return WaitWithMessagePump(future);
             } catch (const std::exception& e) {
                 logger::error("Exception getting focus state for View [{}]: {}", viewId, e.what());
                 return false;
@@ -353,14 +380,18 @@ namespace PrismaUI::ViewManager {
         }
 
         if (viewData && viewData->ultralightView) {
-            auto future = ultralightThread.submit([view_ptr = viewData->ultralightView]() -> bool {
+            auto checkInputFocus = [view_ptr = viewData->ultralightView]() -> bool {
                 if (view_ptr) {
                     return view_ptr->HasInputFocus();
                 }
                 return false;
-            });
+            };
+            if (ultralightThread.IsWorkerThread()) {
+                return checkInputFocus();
+            }
+            auto future = ultralightThread.submit(std::move(checkInputFocus));
             try {
-                return future.get();
+                return WaitWithMessagePump(future);
             } catch (const std::exception& e) {
                 logger::error("View [{}]: Exception in ViewHasInputFocus: {}", viewId, e.what());
                 return false;
@@ -452,9 +483,34 @@ namespace PrismaUI::ViewManager {
         }
 
         logger::debug("Destroy: Cleaning up Ultralight resources (on UI thread) for View [{}]", viewId);
-        auto ultralightCleanupFuture = ultralightThread.submit([viewId, viewData = viewDataToDestroy]() {
+        auto cleanupTask = [viewId, viewData = viewDataToDestroy]() -> bool {
             try {
                 logger::debug("Destroy: Beginning Ultralight resources cleanup for View [{}]", viewId);
+
+                // Clean up WebGL context first (must happen on ultralight thread where it was created)
+                auto* wglCtx = viewData->webglContext.load(std::memory_order_acquire);
+                if (wglCtx) {
+                    logger::debug("Destroy: Releasing WebGL context for View [{}]", viewId);
+                    WebGL::DestroyWebGLContext(wglCtx);
+                    viewData->webglContext.store(nullptr, std::memory_order_release);
+                }
+
+                // Clean up WASM instances
+                if (!viewData->wasmInstances.empty()) {
+                    logger::debug("Destroy: Releasing {} WASM instance(s) for View [{}]",
+                                  viewData->wasmInstances.size(), viewId);
+                    for (auto& inst : viewData->wasmInstances) {
+                        WASM::DestroyInstance(inst);
+                    }
+                    viewData->wasmInstances.clear();
+                }
+
+                // Clean up audio context
+                if (viewData->audioContext) {
+                    logger::debug("Destroy: Releasing AudioContext for View [{}]", viewId);
+                    Audio::DestroyAudioContext(viewData->audioContext);
+                    viewData->audioContext = nullptr;
+                }
 
                 // Clean up inspector resources first
                 if (viewData->inspectorView) {
@@ -499,17 +555,23 @@ namespace PrismaUI::ViewManager {
                 logger::error("Destroy: Unknown exception during Ultralight resource cleanup for View [{}]", viewId);
                 return false;
             }
-        });
+        };
 
-        try {
-            bool ultralight_success = ultralightCleanupFuture.get();
-            if (ultralight_success) {
-                logger::debug("Destroy: Ultralight resources cleanup completed successfully for View [{}]", viewId);
-            } else {
-                logger::warn("Destroy: Ultralight resources cleanup reported failure for View [{}]", viewId);
+        bool ultralight_success = false;
+        if (ultralightThread.IsWorkerThread()) {
+            ultralight_success = cleanupTask();
+        } else {
+            auto ultralightCleanupFuture = ultralightThread.submit(std::move(cleanupTask));
+            try {
+                ultralight_success = WaitWithMessagePump(ultralightCleanupFuture);
+            } catch (const std::exception& e) {
+                logger::error("Destroy: Exception waiting for Ultralight cleanup for View [{}]: {}", viewId, e.what());
             }
-        } catch (const std::exception& e) {
-            logger::error("Destroy: Exception waiting for Ultralight cleanup for View [{}]: {}", viewId, e.what());
+        }
+        if (ultralight_success) {
+            logger::debug("Destroy: Ultralight resources cleanup completed successfully for View [{}]", viewId);
+        } else {
+            logger::warn("Destroy: Ultralight resources cleanup reported failure for View [{}]", viewId);
         }
 
         bool hasD3DResources = (viewDataToDestroy->texture != nullptr || viewDataToDestroy->textureView != nullptr);
@@ -579,36 +641,22 @@ namespace PrismaUI::ViewManager {
     }
 
     bool HasAnyActiveFocus() {
-        std::vector<ultralight::RefPtr<ultralight::View>> viewPtrs;
-        {
-            std::shared_lock lock(viewsMutex);
-            for (const auto& pair : views) {
-                if (pair.second && pair.second->ultralightView) {
-                    viewPtrs.push_back(pair.second->ultralightView);
-                }
+        // Fast path: return cached state (updated by Focus/Unfocus on the
+        // ultralight thread).  Avoids blocking the game thread with submit().get()
+        // which can deadlock with Win32 SendMessage when the ultralight thread is
+        // busy during renderer->Update().
+        if (!ultralightThread.IsWorkerThread()) {
+            return g_anyViewHasFocus.load(std::memory_order_acquire);
+        }
+
+        // On the ultralight thread: query directly for an accurate answer
+        std::shared_lock lock(viewsMutex);
+        for (const auto& pair : views) {
+            if (pair.second && pair.second->ultralightView && pair.second->ultralightView->HasFocus()) {
+                return true;
             }
         }
-
-        if (viewPtrs.empty()) {
-            return false;
-        }
-
-        // Submit a single task to check all views on the UI thread
-        auto future = ultralightThread.submit([viewPtrs = std::move(viewPtrs)]() -> bool {
-            for (const auto& view_ptr : viewPtrs) {
-                if (view_ptr && view_ptr->HasFocus()) {
-                    return true;
-                }
-            }
-            return false;
-        });
-
-        try {
-            return future.get();
-        } catch (const std::exception& e) {
-            logger::error("HasAnyActiveFocus: Exception checking focus: {}", e.what());
-            return false;
-        }
+        return false;
     }
 
     void RegisterConsoleCallback(const Core::PrismaViewId& viewId,

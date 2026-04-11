@@ -25,6 +25,7 @@ namespace PrismaUI::ViewRenderer {
     void CopyPixelsToTexture(Core::PrismaView* viewData, void* pixels, uint32_t width, uint32_t height,
                              uint32_t stride);
     void DrawSingleTexture(std::shared_ptr<Core::PrismaView> viewData);
+    void DrawWebGLOverlay(std::shared_ptr<Core::PrismaView> viewData);
     void DrawCursor();
     void ReleaseViewTexture(Core::PrismaView* viewData);
 }

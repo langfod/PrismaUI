@@ -1,8 +1,13 @@
 ﻿#include "ViewRenderer.h"
 
 #include "Core.h"
+#include "GPU/GPUDriverD3D11.h"
 #include "InputHandler.h"
+#include "WebGL/ANGLEContext.h"
 #include "Inspector.h"
+#include "Utils/SIMDDispatch.h"
+#include <chrono>
+#include <unordered_set>
 
 namespace PrismaUI::ViewRenderer {
     using namespace Core;
@@ -38,6 +43,13 @@ namespace PrismaUI::ViewRenderer {
 
     void RenderSingleView(std::shared_ptr<Core::PrismaView> viewData) {
         if (!viewData || !viewData->ultralightView) return;
+
+        if (viewData->isAccelerated) {
+            // GPU driver handles rendering directly to texture via command list
+            // No bitmap extraction needed — just render inspector if applicable
+            Inspector::RenderInspectorView(viewData);
+            return;
+        }
 
         Surface* surface_base = viewData->ultralightView->surface();
         if (!surface_base) return;
@@ -82,7 +94,8 @@ namespace PrismaUI::ViewRenderer {
                 if (viewData->pixelBuffer.size() != required_size) {
                     viewData->pixelBuffer.resize(required_size);
                 }
-                memcpy(viewData->pixelBuffer.data(), pixels, required_size);
+                // Use SIMD-optimized memcpy
+                SIMD::FastMemcpy(viewData->pixelBuffer.data(), pixels, required_size);
                 viewData->bufferWidth = width;
                 viewData->bufferHeight = height;
                 viewData->bufferStride = stride;
@@ -209,15 +222,8 @@ namespace PrismaUI::ViewRenderer {
             return;
         }
 
-        std::byte* source = static_cast<std::byte*>(pixels);
-        std::byte* dest = static_cast<std::byte*>(mappedResource.pData);
-        uint32_t destPitch = mappedResource.RowPitch;
-
-        if (destPitch == stride) {
-            memcpy(dest, source, (size_t)height * stride);
-        } else {
-            for (uint32_t y = 0; y < height; ++y) memcpy(dest + y * destPitch, source + y * stride, stride);
-        }
+        // Use SIMD-optimized pixel copying
+        SIMD::CopyPixels(mappedResource.pData, mappedResource.RowPitch, pixels, stride, width, height);
 
         d3dContext->Unmap(viewData->texture, 0);
     }
@@ -271,9 +277,19 @@ namespace PrismaUI::ViewRenderer {
             std::shared_lock lock(viewsMutex);
             viewsToDraw.reserve(views.size());
             for (const auto& pair : views) {
-                if (pair.second && !pair.second->isHidden.load() && !pair.second->pendingResourceRelease.load() &&
-                    pair.second->textureView) {
-                    viewsToDraw.push_back(pair.second);
+                if (!pair.second || pair.second->isHidden.load() || pair.second->pendingResourceRelease.load())
+                    continue;
+
+                if (pair.second->isAccelerated) {
+                    // Accelerated views get their SRV from the GPU driver
+                    if (pair.second->ultralightView && gpuDriver) {
+                        viewsToDraw.push_back(pair.second);
+                    }
+                } else {
+                    // Software views use their textureView
+                    if (pair.second->textureView) {
+                        viewsToDraw.push_back(pair.second);
+                    }
                 }
             }
         }
@@ -304,6 +320,48 @@ namespace PrismaUI::ViewRenderer {
 
             spriteBatch->End();
 
+            // Second pass: draw WebGL overlays with straight (non-premultiplied) alpha
+            // blending. ANGLE/WebGL outputs straight alpha, which requires different
+            // blend factors than Ultralight's premultiplied alpha output.
+
+            // Acquire keyed mutexes for shared-texture WebGL contexts that had
+            // new content this frame (mutexReleasedThisFrame set by FlushDirtyContexts).
+            // If no new draws happened, the texture content is stable and we can
+            // draw without mutex synchronization.
+            std::vector<WebGL::ANGLEContext*> acquiredMutexes;
+            std::unordered_set<WebGL::ANGLEContext*> failedContexts;
+            for (const auto& viewData : viewsToDraw) {
+                if (!viewData) continue;
+                auto* wgl = viewData->webglContext.load(std::memory_order_acquire);
+                if (!wgl) continue;
+                if (wgl->useSharedTexturePath && wgl->mutexReleasedThisFrame && wgl->skyrimMutex) {
+                    HRESULT hr = wgl->skyrimMutex->AcquireSync(1, 5);
+                    if (SUCCEEDED(hr)) {
+                        acquiredMutexes.push_back(wgl);
+                    } else {
+                        failedContexts.insert(wgl);
+                    }
+                }
+            }
+
+            spriteBatch->Begin(DirectX::SpriteSortMode_Deferred, commonStates->NonPremultiplied());
+
+            for (const auto& viewData : viewsToDraw) {
+                if (!viewData) continue;
+                auto* ctx = viewData->webglContext.load(std::memory_order_acquire);
+                if (ctx && failedContexts.count(ctx)) {
+                    continue;
+                }
+                DrawWebGLOverlay(viewData);
+            }
+
+            spriteBatch->End();
+
+            // Release all acquired keyed mutexes after End() has submitted GPU work
+            for (auto* wgl : acquiredMutexes) {
+                wgl->skyrimMutex->ReleaseSync(0);
+            }
+
             d3dContext->OMSetBlendState(backupBlendState, backupBlendFactor, backupSampleMask);
             d3dContext->OMSetDepthStencilState(backupDepthStencilState, backupStencilRef);
             d3dContext->RSSetState(backupRasterizerState);
@@ -319,19 +377,39 @@ namespace PrismaUI::ViewRenderer {
     }
 
     void DrawSingleTexture(std::shared_ptr<Core::PrismaView> viewData) {
-        if (!viewData || !viewData->textureView || viewData->textureWidth == 0 || viewData->textureHeight == 0) return;
+        if (!viewData) return;
+
+        ID3D11ShaderResourceView* srv = nullptr;
+        uint32_t texWidth = 0;
+        uint32_t texHeight = 0;
+
+        if (viewData->isAccelerated) {
+            if (!gpuDriver || !viewData->ultralightView) return;
+            srv = gpuDriver->GetShaderResourceView(viewData->ultralightView.get());
+            if (!srv) return;
+            auto rt = viewData->ultralightView->render_target();
+            texWidth = rt.width;
+            texHeight = rt.height;
+        } else {
+            if (!viewData->textureView || viewData->textureWidth == 0 || viewData->textureHeight == 0) return;
+            srv = viewData->textureView;
+            texWidth = viewData->textureWidth;
+            texHeight = viewData->textureHeight;
+        }
+
+        if (!srv || texWidth == 0 || texHeight == 0) return;
 
         // Draw main view
         DirectX::SimpleMath::Vector2 position(0.0f, 0.0f);
-        RECT sourceRect = {0, 0, (long)viewData->textureWidth, (long)viewData->textureHeight};
+        RECT sourceRect = {0, 0, (long)texWidth, (long)texHeight};
 
-        spriteBatch->Draw(viewData->textureView, position, &sourceRect, DirectX::Colors::White, 0.f,
+        spriteBatch->Draw(srv, position, &sourceRect, DirectX::Colors::White, 0.f,
                           DirectX::SimpleMath::Vector2::Zero, 1.0f, DirectX::SpriteEffects_None, 0.f);
 
         // Draw inspector overlay if visible
         if (viewData->inspectorVisible.load() && viewData->inspectorTextureView &&
             viewData->inspectorTextureWidth > 0 && viewData->inspectorTextureHeight > 0) {
-            DirectX::SimpleMath::Vector2 inspectorPos(viewData->inspectorPosX, viewData->inspectorPosY);
+            DirectX::SimpleMath::Vector2 inspectorPos(viewData->inspectorPosX.load(), viewData->inspectorPosY.load());
             // Source rect should use actual texture dimensions
             RECT inspectorSourceRect = {0, 0, (long)viewData->inspectorTextureWidth,
                                         (long)viewData->inspectorTextureHeight};
@@ -340,5 +418,124 @@ namespace PrismaUI::ViewRenderer {
                               DirectX::Colors::White, 0.f, DirectX::SimpleMath::Vector2::Zero, 1.0f,
                               DirectX::SpriteEffects_None, 0.f);
         }
+    }
+
+    void DrawWebGLOverlay(std::shared_ptr<Core::PrismaView> viewData) {
+        if (!viewData) return;
+        auto* webgl = viewData->webglContext.load(std::memory_order_acquire);
+        if (!webgl) {
+            static uint64_t lastNoCtxLog = 0;
+            uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (now - lastNoCtxLog > 5000) {
+                logger::debug("[WebGL-DBG] DrawWebGLOverlay: viewData->webglContext is null for view {}", viewData->id);
+                lastNoCtxLog = now;
+            }
+            return;
+        }
+        if (!webgl->initialized || !webgl->sharedSRV) {
+            static uint64_t lastUninitLog = 0;
+            uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (now - lastUninitLog > 5000) {
+                logger::debug("[WebGL-DBG] DrawWebGLOverlay: context not ready (initialized={}, sharedSRV={})",
+                    webgl->initialized,
+                    webgl->sharedSRV != nullptr);
+                lastUninitLog = now;
+            }
+            return;
+        }
+
+        if (!webgl->visible.load(std::memory_order_relaxed)) {
+            static uint64_t lastVisLog = 0;
+            uint64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count();
+            if (now - lastVisLog > 5000) {
+                logger::debug("[WebGL-DBG] DrawWebGLOverlay: webgl->visible is false");
+                lastVisLog = now;
+            }
+            return;
+        }
+
+        // Snapshot atomic fields once for a consistent view throughout this function
+        float cx = webgl->canvasX.load(std::memory_order_relaxed);
+        float cy = webgl->canvasY.load(std::memory_order_relaxed);
+        float dw = webgl->displayWidth.load(std::memory_order_relaxed);
+        float dh = webgl->displayHeight.load(std::memory_order_relaxed);
+        uint64_t lastUpdate = webgl->lastUpdateMs.load(std::memory_order_relaxed);
+
+        uint64_t nowMs = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch())
+                .count());
+        if (lastUpdate != 0 && nowMs - lastUpdate > 1500) {
+            static uint64_t lastStaleLog = 0;
+            if (nowMs - lastStaleLog > 5000) {
+                logger::debug("[WebGL-DBG] DrawWebGLOverlay: stale — lastUpdateMs={}, now={}, delta={}ms",
+                    lastUpdate, nowMs, nowMs - lastUpdate);
+                lastStaleLog = nowMs;
+            }
+            return;
+        }
+        if (webgl->canvasWidth == 0 || webgl->canvasHeight == 0) {
+            static uint64_t lastSizeLog = 0;
+            if (nowMs - lastSizeLog > 5000) {
+                logger::debug("[WebGL-DBG] DrawWebGLOverlay: canvas size is 0x0");
+                lastSizeLog = nowMs;
+            }
+            return;
+        }
+
+        static uint64_t lastDrawLog = 0;
+        static bool loggedViewport = false;
+        if (!loggedViewport) {
+            loggedViewport = true;
+            // Log the D3D11 viewport to understand coordinate mapping
+            D3D11_VIEWPORT vp = {};
+            UINT numVP = 1;
+            Core::d3dContext->RSGetViewports(&numVP, &vp);
+            logger::info("[WebGL-DBG] DrawWebGLOverlay: D3D viewport: ({},{}) {}x{} (topLeftX={}, topLeftY={})",
+                vp.TopLeftX, vp.TopLeftY, vp.Width, vp.Height, vp.TopLeftX, vp.TopLeftY);
+            logger::info("[WebGL-DBG] DrawWebGLOverlay: screenSize={}x{}", Core::screenSize.width, Core::screenSize.height);
+            logger::info("[WebGL-DBG] DrawWebGLOverlay: webgl pos=({},{}) bufSize={}x{} displaySize={}x{} sharedSRV={}",
+                cx, cy, webgl->canvasWidth, webgl->canvasHeight,
+                dw, dh,
+                static_cast<void*>(webgl->sharedSRV.Get()));
+        }
+
+        DirectX::SimpleMath::Vector2 webglPos(cx, cy);
+        RECT webglSourceRect = {0, 0, (long)webgl->canvasWidth, (long)webgl->canvasHeight};
+
+        // Compute scale factor: display size may differ from buffer size
+        // (e.g. CSS object-fit: contain scales a 300x150 canvas to fill the viewport).
+        float scaleX = 1.0f;
+        float scaleY = 1.0f;
+        if (dw > 0 && dh > 0 &&
+            webgl->canvasWidth > 0 && webgl->canvasHeight > 0) {
+            scaleX = dw / static_cast<float>(webgl->canvasWidth);
+            scaleY = dh / static_cast<float>(webgl->canvasHeight);
+        }
+
+        if (nowMs - lastDrawLog > 5000) {
+            logger::debug("[WebGL-DBG] DrawWebGLOverlay: DRAWING at ({},{}) buf {}x{} display {}x{} scale({:.2f},{:.2f}), lastUpdate={}ms ago",
+                cx, cy, webgl->canvasWidth, webgl->canvasHeight,
+                dw, dh, scaleX, scaleY,
+                nowMs - lastUpdate);
+            lastDrawLog = nowMs;
+        }
+
+        DirectX::SimpleMath::Vector2 scale(scaleX, scaleY);
+
+        // When using the shared texture path, ANGLE renders with OpenGL
+        // conventions (origin at bottom-left), so we flip vertically.
+        // Keyed mutex synchronization is handled by DrawViews around the
+        // entire SpriteBatch pass.
+        auto effects = webgl->useSharedTexturePath
+            ? DirectX::SpriteEffects_FlipVertically
+            : DirectX::SpriteEffects_None;
+
+        spriteBatch->Draw(webgl->sharedSRV.Get(), webglPos, &webglSourceRect,
+                          DirectX::Colors::White, 0.f, DirectX::SimpleMath::Vector2::Zero, scale,
+                          effects, 0.f);
     }
 }

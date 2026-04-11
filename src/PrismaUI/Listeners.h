@@ -18,6 +18,7 @@ namespace PrismaUI::Listeners {
 
     class MyLoadListener : public LoadListener {
         Core::PrismaViewId viewId_;
+        bool webglInjectedForLoad_ = false;
 
     public:
         explicit MyLoadListener(Core::PrismaViewId id);

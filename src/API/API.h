@@ -4,7 +4,7 @@
 
 class PluginAPI
 {
-	using LatestInterface = PRISMA_UI_API::IVPrismaUI2;
+	using LatestInterface = PRISMA_UI_API::IVPrismaUI3;
 
 public:
 	class PrismaUIInterface : public LatestInterface
@@ -47,6 +47,9 @@ public:
 		// IVPrismaUI2
 
 		virtual void RegisterConsoleCallback(PrismaView view, PRISMA_UI_API::ConsoleMessageCallback callback) noexcept override;
+
+		// GPU-accelerated view creation
+		virtual PrismaView CreateViewAccelerated(const char* htmlPath, PRISMA_UI_API::OnDomReadyCallback onDomReadyCallback = nullptr) noexcept override;
 
 	private:
 		unsigned long apiTID = 0;

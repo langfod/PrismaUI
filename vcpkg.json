@@ -4,10 +4,15 @@
     "directxmath",
     "directxtk",
     "rapidcsv",
+    "cpuinfo",
     "fmt",
     {
       "name": "spdlog",
       "features": ["wchar"]
-    }
-  ]
+    },
+    "zlib",
+    "egl-registry",
+    "opengl-registry",
+    "angle"
+   ]
 }

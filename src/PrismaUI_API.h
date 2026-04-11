@@ -20,7 +20,7 @@ namespace PRISMA_UI_API {
     constexpr const auto PrismaUIPluginName = "PrismaUI";
 
     // Available PrismaUI interface versions
-    enum class InterfaceVersion : uint8_t { V1, V2 };
+    enum class InterfaceVersion : uint8_t { V1, V2, V3 };
 
     typedef void (*OnDomReadyCallback)(PrismaView view);
     typedef void (*JSCallback)(const char* result);
@@ -116,6 +116,17 @@ namespace PRISMA_UI_API {
         virtual void RegisterConsoleCallback(PrismaView view, ConsoleMessageCallback callback) noexcept = 0;
     };
 
+    // PrismaUI modder interface v3 (extends v2)
+    class IVPrismaUI3 : public IVPrismaUI2 {
+    protected:
+        ~IVPrismaUI3() = default;
+
+    public:
+        // Create view with GPU acceleration option.
+        virtual PrismaView CreateViewAccelerated(const char* htmlPath,
+                                                 OnDomReadyCallback onDomReadyCallback = nullptr) noexcept = 0;
+    };
+
     // Maps interface types to InterfaceVersion enum values.
     // compile-time constraint -- only request interface versions that actually exist.
     template <typename T>
@@ -129,6 +140,11 @@ namespace PRISMA_UI_API {
     template <>
     struct InterfaceVersionMap<IVPrismaUI2> {
         static constexpr InterfaceVersion version = InterfaceVersion::V2;
+    };
+
+    template <>
+    struct InterfaceVersionMap<IVPrismaUI3> {
+        static constexpr InterfaceVersion version = InterfaceVersion::V3;
     };
 
     typedef void* (*RequestPluginAPIFunc)(InterfaceVersion interfaceVersion);
@@ -158,6 +174,7 @@ namespace PRISMA_UI_API {
     /// Usage:
     ///   auto* m_prismaUI   = PRISMA_UI_API::RequestPluginAPI<PRISMA_UI_API::IVPrismaUI1>();
     ///   auto* m_prismaUIv2 = PRISMA_UI_API::RequestPluginAPI<PRISMA_UI_API::IVPrismaUI2>();
+    ///   auto* m_prismaUIv3 = PRISMA_UI_API::RequestPluginAPI<PRISMA_UI_API::IVPrismaUI3>();
     template <typename T>
     [[nodiscard]] inline T* RequestPluginAPI() {
         return static_cast<T*>(RequestPluginAPI(InterfaceVersionMap<T>::version));

@@ -32,11 +32,28 @@
 
 #include "Hooks/Hooks.h"
 #include "Menus/FocusMenu/FocusMenu.h"
+#include "Utils/AlignedAllocator.h"
 #include "Utils/NanoID.h"
 #include "Utils/SingleThreadExecutor.h"
 
 namespace PRISMA_UI_API {
     enum class ConsoleMessageLevel : uint8_t;
+}
+
+namespace PrismaUI::GPU {
+    class GPUDriverD3D11;
+}
+
+namespace PrismaUI::WebGL {
+    struct ANGLEContext;
+}
+
+namespace PrismaUI::WASM {
+    struct WASMInstanceHandle;
+}
+
+namespace PrismaUI::Audio {
+    struct AudioContext;
 }
 
 namespace PrismaUI::Listeners {
@@ -56,6 +73,7 @@ namespace PrismaUI::Core {
         std::string htmlPathToLoad;
         std::string originalUrl;    // Original URL from view creation (for recovery)
         std::string lastLoadedUrl;  // Track last successfully loaded URL
+        bool isAccelerated = false; // Whether this view uses GPU-accelerated rendering
         std::atomic<bool> isHidden = false;
         std::unique_ptr<Listeners::MyLoadListener> loadListener;
         std::unique_ptr<Listeners::MyViewListener> viewListener;
@@ -69,8 +87,19 @@ namespace PrismaUI::Core {
         std::atomic<bool> needsRecovery = false;  // Flag for recovery after exception
         std::atomic<int> recoveryAttempts = 0;    // Track recovery attempts to prevent loops
 
+        // WebGL support
+        std::atomic<WebGL::ANGLEContext*> webglContext{nullptr};  // Set once from ultralight thread, read from render thread
+
+        // Web Audio support
+        Audio::AudioContext* audioContext = nullptr;  // Non-null if view has an active AudioContext
+
+        // WASM support
+        // Tracks all live WASM instances for this view, cleaned up on view destroy.
+        std::vector<WASM::WASMInstanceHandle> wasmInstances;
+
         // Inspector rendering data
-        std::vector<std::byte> inspectorPixelBuffer;
+        // 32-byte aligned buffer for optimal SIMD performance
+        std::vector<std::byte, Utils::AlignedAllocator<std::byte, 32>> inspectorPixelBuffer;
         uint32_t inspectorBufferWidth = 0;
         uint32_t inspectorBufferHeight = 0;
         uint32_t inspectorBufferStride = 0;
@@ -81,10 +110,10 @@ namespace PrismaUI::Core {
         ID3D11ShaderResourceView* inspectorTextureView = nullptr;
         uint32_t inspectorTextureWidth = 0;
         uint32_t inspectorTextureHeight = 0;
-        float inspectorPosX = 0.0f;
-        float inspectorPosY = 0.0f;
-        uint32_t inspectorDisplayWidth = 0;
-        uint32_t inspectorDisplayHeight = 0;
+        std::atomic<float> inspectorPosX{0.0f};
+        std::atomic<float> inspectorPosY{0.0f};
+        std::atomic<uint32_t> inspectorDisplayWidth{0};
+        std::atomic<uint32_t> inspectorDisplayHeight{0};
         float inspectorOpacity = 1.0f;
 
         // Primary view rendering data
@@ -92,7 +121,9 @@ namespace PrismaUI::Core {
         ID3D11ShaderResourceView* textureView = nullptr;
         uint32_t textureWidth = 0;
         uint32_t textureHeight = 0;
-        std::vector<std::byte> pixelBuffer;
+        // 32-byte aligned buffer for optimal SIMD performance (AVX2)
+        // Also works perfectly fine for SSE2 and AVX (they use 16-byte alignment)
+        std::vector<std::byte, Utils::AlignedAllocator<std::byte, 32>> pixelBuffer;
         uint32_t bufferWidth = 0;
         uint32_t bufferHeight = 0;
         uint32_t bufferStride = 0;
@@ -122,6 +153,7 @@ namespace PrismaUI::Core {
     extern std::unique_ptr<DirectX::SpriteBatch> spriteBatch;
     extern std::unique_ptr<DirectX::CommonStates> commonStates;
     extern Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> cursorTexture;
+    extern std::unique_ptr<GPU::GPUDriverD3D11> gpuDriver;
 
     extern std::map<PrismaViewId, std::shared_ptr<PrismaView>> views;
     extern std::shared_mutex viewsMutex;
@@ -136,6 +168,34 @@ namespace PrismaUI::Core {
 
     extern std::map<std::pair<PrismaViewId, std::string>, JSCallbackData> jsCallbacks;
     extern std::mutex jsCallbacksMutex;
+
+    // Block-wait on a std::future while pumping Win32 messages.
+    // Prevents deadlocks when the ultralight thread (or any background thread)
+    // does a synchronous SendMessage to the game's HWND while the game thread
+    // is waiting for it to finish.
+    template <typename T>
+    T WaitWithMessagePump(std::future<T>& fut) {
+        while (fut.wait_for(std::chrono::milliseconds(1)) != std::future_status::ready) {
+            MSG msg;
+            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        return fut.get();
+    }
+
+    // void specialization
+    inline void WaitWithMessagePump(std::future<void>& fut) {
+        while (fut.wait_for(std::chrono::milliseconds(1)) != std::future_status::ready) {
+            MSG msg;
+            while (PeekMessageW(&msg, nullptr, 0, 0, PM_REMOVE)) {
+                TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        fut.get();
+    }
 
     extern inline REL::Relocation<Hooks::D3DPresentHook::D3DPresentFunc> RealD3dPresentFunc;
 

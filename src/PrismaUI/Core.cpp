@@ -3,6 +3,7 @@
 #include <eh.h>  // For _set_se_translator
 
 #include "Communication.h"
+#include "GPU/GPUDriverD3D11.h"
 #include "InputHandler.h"
 #include "Inspector.h"
 #include "Listeners.h"
@@ -10,6 +11,9 @@
 #include "ViewManager.h"
 #include "ViewOperationQueue.h"
 #include "ViewRenderer.h"
+#include "WASM/WASMRuntime.h"
+#include "WebGL/ANGLEContext.h"
+#include "WebGL/WebGLBridge.h"
 
 namespace {
     // SEH exception class to convert structured exceptions to C++ exceptions
@@ -107,6 +111,7 @@ namespace PrismaUI::Core {
     std::unique_ptr<DirectX::SpriteBatch> spriteBatch;
     std::unique_ptr<DirectX::CommonStates> commonStates;
     Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> cursorTexture;
+    std::unique_ptr<GPU::GPUDriverD3D11> gpuDriver;
 
     std::map<PrismaViewId, std::shared_ptr<PrismaView>> views;
     std::shared_mutex viewsMutex;
@@ -136,6 +141,11 @@ namespace PrismaUI::Core {
                     Config config;
                     config.resource_path_prefix = "resources/";
                     plat.set_config(config);
+
+                    // Create GPU driver and register with platform before creating renderer
+                    // D3D resources will be initialized later in InitGraphics()
+                    gpuDriver = std::make_unique<GPU::GPUDriverD3D11>();
+                    plat.set_gpu_driver(gpuDriver.get());
 
                     renderer = Renderer::Create();
                     if (!renderer) {
@@ -244,6 +254,25 @@ namespace PrismaUI::Core {
                     logger::error("Failed to load cursor texture from '{}'. HRESULT: 0x{:08X}", cursorPath.string(),
                                   static_cast<unsigned int>(hr));
                     cursorTexture.Reset();
+                }
+            }
+
+            // Initialize GPU driver D3D resources once device/context are available
+            if (gpuDriver && !gpuDriver->IsD3DInitialized()) {
+                gpuDriver->InitializeD3D(d3dDevice, d3dContext);
+                if (!gpuDriver->IsD3DInitialized()) {
+                    logger::error("InitGraphics: GPU driver D3D initialization failed. GPU-accelerated views will not render.");
+                }
+            }
+
+            // Initialize ANGLE EGL display for WebGL support
+            static bool angleInitAttempted = false;
+            if (!angleInitAttempted) {
+                angleInitAttempted = true;
+                if (WebGL::InitializeANGLEDisplay(d3dDevice)) {
+                    logger::info("InitGraphics: ANGLE EGL display initialized for WebGL support.");
+                } else {
+                    logger::warn("InitGraphics: ANGLE initialization failed. WebGL will not be available.");
                 }
             }
         } else {
@@ -376,7 +405,7 @@ namespace PrismaUI::Core {
                 for (auto& viewData : viewsToInitialize) {
                     if (!viewData || viewData->ultralightView) continue;
 
-                    logger::info("UI Thread: Creating View [{}] for path: {}", viewData->id, viewData->htmlPathToLoad);
+                    logger::info("UI Thread: Creating {} View [{}] for path: {}", viewData->isAccelerated ? "GPU" : "CPU", viewData->id, viewData->htmlPathToLoad);
 
                     if (screenSize.width == 0 || screenSize.height == 0) {
                         logger::error("UI Thread: Cannot create View [{}], screen size is zero.", viewData->id);
@@ -390,12 +419,12 @@ namespace PrismaUI::Core {
                     }
 
                     ViewConfig view_config;
-                    view_config.is_accelerated = false;
+                    view_config.is_accelerated = viewData->isAccelerated;
                     view_config.is_transparent = true;
                     view_config.initial_focus = false;
                     view_config.enable_images = true;
                     view_config.enable_javascript = true;
-                    view_config.enable_compositor = false;
+                    view_config.enable_compositor = true;
 
                     viewData->ultralightView =
                         localRenderer->CreateView(screenSize.width, screenSize.height, view_config, nullptr);
@@ -417,11 +446,19 @@ namespace PrismaUI::Core {
 
                 ProcessEvents();
 
+                // Reset per-frame WebGL state so the first GL call re-syncs
+                // ANGLE's D3D11 state after Ultralight may have changed it.
+                WebGL::ResetFrameState();
+
                 if (localRenderer) {
                     localRenderer->Update();
                     localRenderer->RefreshDisplay(0);
                     localRenderer->Render();
                 }
+
+                // Perform a single deferred readback for each WebGL context
+                // that had draw calls this frame (instead of per-draw-call).
+                WebGL::FlushDirtyContexts();
 
                 RenderViews();
             } catch (const SEHException& seh) {
@@ -465,13 +502,104 @@ namespace PrismaUI::Core {
             }
         });
 
-        // Wait for UI thread but handle any exceptions that might have escaped
+        // Wait for UI thread, pumping Win32 messages to avoid SendMessage deadlocks.
+        // Ultralight/WebCore may SendMessage to the game HWND during renderer->Update()
+        // (e.g. for COM, DWrite font queries).  If the game thread is blocked here without
+        // pumping, that SendMessage will never be delivered and both threads deadlock.
         try {
-            ultralightFuture.get();
+            WaitWithMessagePump(ultralightFuture);
         } catch (const std::exception& e) {
             logger::error("D3DPresent: Exception from UI thread: {}", e.what());
         } catch (...) {
             logger::error("D3DPresent: Unknown exception from UI thread");
+        }
+
+        // Execute GPU driver commands on render thread (D3D state save/restore)
+        if (gpuDriver && gpuDriver->IsD3DInitialized() && gpuDriver->HasPendingCommands()) {
+            // Save all D3D state that the GPU driver modifies (using ComPtr for exception safety)
+            Microsoft::WRL::ComPtr<ID3D11RenderTargetView> backupRTV;
+            Microsoft::WRL::ComPtr<ID3D11DepthStencilView> backupDSV;
+            D3D11_VIEWPORT backupViewport = {};
+            UINT numViewports = 1;
+            Microsoft::WRL::ComPtr<ID3D11BlendState> backupBlend;
+            FLOAT backupBlendFactor[4] = {};
+            UINT backupSampleMask = 0;
+            Microsoft::WRL::ComPtr<ID3D11RasterizerState> backupRasterizer;
+            Microsoft::WRL::ComPtr<ID3D11DepthStencilState> backupDepthStencil;
+            UINT backupStencilRef = 0;
+
+            // Shaders & input layout
+            Microsoft::WRL::ComPtr<ID3D11VertexShader> backupVS;
+            Microsoft::WRL::ComPtr<ID3D11PixelShader> backupPS;
+            Microsoft::WRL::ComPtr<ID3D11InputLayout> backupInputLayout;
+
+            // IA state
+            Microsoft::WRL::ComPtr<ID3D11Buffer> backupVB;
+            UINT backupVBStride = 0;
+            UINT backupVBOffset = 0;
+            Microsoft::WRL::ComPtr<ID3D11Buffer> backupIB;
+            DXGI_FORMAT backupIBFormat = DXGI_FORMAT_UNKNOWN;
+            UINT backupIBOffset = 0;
+            D3D11_PRIMITIVE_TOPOLOGY backupTopology = D3D11_PRIMITIVE_TOPOLOGY_UNDEFINED;
+
+            // Constant buffers (slot 0)
+            Microsoft::WRL::ComPtr<ID3D11Buffer> backupVSCB;
+            Microsoft::WRL::ComPtr<ID3D11Buffer> backupPSCB;
+
+            // PS shader resources (slots 0-2) and samplers (slot 0)
+            Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> backupSRV[3];
+            Microsoft::WRL::ComPtr<ID3D11SamplerState> backupSampler;
+
+            // Scissor rects
+            D3D11_RECT backupScissorRect = {};
+            UINT numScissorRects = 1;
+
+            // --- Save state ---
+            d3dContext->OMGetRenderTargets(1, backupRTV.GetAddressOf(), backupDSV.GetAddressOf());
+            d3dContext->RSGetViewports(&numViewports, &backupViewport);
+            d3dContext->OMGetBlendState(backupBlend.GetAddressOf(), backupBlendFactor, &backupSampleMask);
+            d3dContext->RSGetState(backupRasterizer.GetAddressOf());
+            d3dContext->OMGetDepthStencilState(backupDepthStencil.GetAddressOf(), &backupStencilRef);
+
+            d3dContext->VSGetShader(backupVS.GetAddressOf(), nullptr, nullptr);
+            d3dContext->PSGetShader(backupPS.GetAddressOf(), nullptr, nullptr);
+            d3dContext->IAGetInputLayout(backupInputLayout.GetAddressOf());
+            d3dContext->IAGetVertexBuffers(0, 1, backupVB.GetAddressOf(), &backupVBStride, &backupVBOffset);
+            d3dContext->IAGetIndexBuffer(backupIB.GetAddressOf(), &backupIBFormat, &backupIBOffset);
+            d3dContext->IAGetPrimitiveTopology(&backupTopology);
+            d3dContext->VSGetConstantBuffers(0, 1, backupVSCB.GetAddressOf());
+            d3dContext->PSGetConstantBuffers(0, 1, backupPSCB.GetAddressOf());
+
+            ID3D11ShaderResourceView* rawSRVs[3] = {};
+            d3dContext->PSGetShaderResources(0, 3, rawSRVs);
+            for (int i = 0; i < 3; ++i) { backupSRV[i].Attach(rawSRVs[i]); }
+
+            d3dContext->PSGetSamplers(0, 1, backupSampler.GetAddressOf());
+            d3dContext->RSGetScissorRects(&numScissorRects, &backupScissorRect);
+
+            gpuDriver->DrawCommandList();
+
+            // --- Restore state ---
+            d3dContext->OMSetRenderTargets(1, backupRTV.GetAddressOf(), backupDSV.Get());
+            d3dContext->RSSetViewports(numViewports, &backupViewport);
+            d3dContext->OMSetBlendState(backupBlend.Get(), backupBlendFactor, backupSampleMask);
+            d3dContext->RSSetState(backupRasterizer.Get());
+            d3dContext->OMSetDepthStencilState(backupDepthStencil.Get(), backupStencilRef);
+
+            d3dContext->VSSetShader(backupVS.Get(), nullptr, 0);
+            d3dContext->PSSetShader(backupPS.Get(), nullptr, 0);
+            d3dContext->IASetInputLayout(backupInputLayout.Get());
+            d3dContext->IASetVertexBuffers(0, 1, backupVB.GetAddressOf(), &backupVBStride, &backupVBOffset);
+            d3dContext->IASetIndexBuffer(backupIB.Get(), backupIBFormat, backupIBOffset);
+            d3dContext->IASetPrimitiveTopology(backupTopology);
+            d3dContext->VSSetConstantBuffers(0, 1, backupVSCB.GetAddressOf());
+            d3dContext->PSSetConstantBuffers(0, 1, backupPSCB.GetAddressOf());
+
+            ID3D11ShaderResourceView* restoreSRVs[3] = {backupSRV[0].Get(), backupSRV[1].Get(), backupSRV[2].Get()};
+            d3dContext->PSSetShaderResources(0, 3, restoreSRVs);
+
+            d3dContext->PSSetSamplers(0, 1, backupSampler.GetAddressOf());
+            if (numScissorRects > 0) d3dContext->RSSetScissorRects(numScissorRects, &backupScissorRect);
         }
 
         std::vector<std::shared_ptr<PrismaView>> viewsToCheck;
@@ -486,7 +614,9 @@ namespace PrismaUI::Core {
         }
 
         for (const auto& viewData : viewsToCheck) {
-            UpdateSingleTextureFromBuffer(viewData);
+            if (!viewData->isAccelerated) {
+                UpdateSingleTextureFromBuffer(viewData);
+            }
         }
 
         DrawViews();
@@ -527,6 +657,10 @@ namespace PrismaUI::Core {
             std::unique_lock lock(viewsMutex);
             views.clear();
         }
+
+        // Force-shutdown WAMR runtime (safety net — individual instances cleaned up in Destroy)
+        WASM::ForceShutdownRuntime();
+
         if (renderer) {
             // Move renderer to the lambda so it's the sole owner,
             // ensuring release happens on the UI thread
@@ -537,6 +671,12 @@ namespace PrismaUI::Core {
                 })
                 .get();
         }
+
+        // GPU driver must be destroyed after the renderer, since the Ultralight
+        // Platform holds a raw pointer (set via set_gpu_driver) and the renderer's
+        // destructor may call back into the driver to release GPU resources.
+        gpuDriver.reset();
+        logger::debug("GPU driver resources released.");
 
         // Release Ultralight platform objects after renderer is destroyed
         ultralightLogger.reset();

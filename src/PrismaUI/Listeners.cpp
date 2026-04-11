@@ -309,7 +309,8 @@ namespace PrismaUI::Listeners {
                 ViewConfig config;
                 config.is_accelerated = false;
                 config.is_transparent = true;
-
+                config.enable_compositor = true;
+                
                 viewData->inspectorView = renderer->CreateView(width, height, config, nullptr);
                 inspectorView = viewData->inspectorView;
 

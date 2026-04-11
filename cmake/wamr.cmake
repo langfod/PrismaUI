@@ -3,9 +3,9 @@
 
 include(FetchContent)
 
-FetchContent_Declare(wamr
+fetchcontent_declare(wamr
     GIT_REPOSITORY https://github.com/bytecodealliance/wasm-micro-runtime
-    GIT_TAG WAMR-2.4.4
+    GIT_TAG main
     GIT_SHALLOW TRUE
     PATCH_COMMAND git apply --check "${CMAKE_CURRENT_LIST_DIR}/patches/wamr-fix-os_mprotect.patch"
     && git apply "${CMAKE_CURRENT_LIST_DIR}/patches/wamr-fix-os_mprotect.patch"
@@ -28,7 +28,7 @@ set(WAMR_BUILD_BULK_MEMORY 1 CACHE BOOL "" FORCE) # Required by many toolchains
 set(WAMR_BUILD_REF_TYPES 1 CACHE BOOL "" FORCE) # Required by newer WASM
 set(WAMR_BUILD_SIMD 1 CACHE BOOL "" FORCE) # SIMD support
 set(WAMR_BUILD_SIMDE 0 CACHE BOOL "" FORCE) # SIMDe fallback for non-SIMD hosts
-set(WAMR_BUILD_MEMORY64 1 CACHE BOOL "" FORCE)
+set(WAMR_BUILD_MEMORY64 0 CACHE BOOL "" FORCE)
 # Enable WASM-level call stack dumps for diagnostics
 set(WAMR_BUILD_DUMP_CALL_STACK 1 CACHE BOOL "" FORCE)
 set(WAMR_BUILD_CUSTOM_NAME_SECTION 1 CACHE BOOL "" FORCE)
@@ -43,7 +43,7 @@ set(WAMR_DISABLE_HW_BOUND_CHECK 1 CACHE BOOL "" FORCE)
 # We don't need the shared library (iwasm.dll), only the static lib (iwasm_static / vmlib.lib)
 set(WAMR_BUILD_SHARED 0 CACHE BOOL "" FORCE)
 
-FetchContent_MakeAvailable(wamr)
+fetchcontent_makeavailable(wamr)
 
 # Helper function to add WAMR to a target
 # The WAMR static library target is "iwasm_static" (OUTPUT_NAME = vmlib)

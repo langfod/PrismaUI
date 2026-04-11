@@ -202,8 +202,31 @@ namespace PrismaUI::Core {
 
             if (input_handler_initialized.compare_exchange_strong(expected_ih_init, true)) {
                 Initialize(hWnd, &ultralightThread, &views, &viewsMutex);
-                InstallWndProcHook();
-            }    
+
+                // Thread-affinity issue with SetWindowSubclass:
+                // - Windows requires SetWindowSubclass to be called from the window's owning thread
+                // - The game HWND is created on the main thread (thread that creates the window)
+                // - We are currently on the render thread (D3D Present hook)
+                // - Behavior varies across systems:
+                //   * Some systems: SetWindowSubclass works cross-thread (Windows 10+)
+                //   * Other systems: SetWindowSubclass fails unless called from main thread
+                // Solution: Try direct installation first (faster), fallback to main thread if it fails
+                
+                logger::info("Attempting to install WndProc hook from render thread...");
+                if (InstallWndProcHook()) {
+                    logger::info("WndProc hook installed successfully from render thread.");
+                } else {
+                    logger::warn("Direct installation failed, scheduling on main thread...");
+                    SKSE::GetTaskInterface()->AddTask([]() {
+                        logger::info("Attempting to install WndProc hook from main thread...");
+                        if (InstallWndProcHook()) {
+                            logger::info("WndProc hook installed successfully from main thread.");
+                        } else {
+                            logger::error("Failed to install WndProc hook even from main thread!");
+                        }
+                    });
+                }
+            }
         } else if (!hWnd) {
             logger::warn("InitGraphics: Could not obtain HWND.");
         }
@@ -401,7 +424,7 @@ namespace PrismaUI::Core {
                     view_config.initial_focus = false;
                     view_config.enable_images = true;
                     view_config.enable_javascript = true;
-                    view_config.enable_compositor = false;
+                    view_config.enable_compositor = true;
 
                     viewData->ultralightView =
                         localRenderer->CreateView(screenSize.width, screenSize.height, view_config, nullptr);

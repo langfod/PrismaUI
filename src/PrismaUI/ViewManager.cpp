@@ -45,21 +45,21 @@ namespace PrismaUI::ViewManager {
             std::unique_lock lock(viewsMutex);
             int maxOrder = -1;
             if (views.empty()) {
-                viewData->order = 0;
+                viewData->order.store(0);
             } else {
                 for (const auto& pair : views) {
-                    if (pair.second->order > maxOrder) {
-                        maxOrder = pair.second->order;
+                    if (pair.second->order.load() > maxOrder) {
+                        maxOrder = pair.second->order.load();
                     }
                 }
-                viewData->order = maxOrder + 1;
+                viewData->order.store(maxOrder + 1);
             }
             views[newViewId] = viewData;
         }
 
         logger::info(
             "View [{}] creation requested for path: {} with order <{}>. Actual view will be created by UI thread.",
-            newViewId, fileUrl, viewData->order);
+            newViewId, fileUrl, viewData->order.load());
 
         return newViewId;
     }
@@ -546,7 +546,7 @@ namespace PrismaUI::ViewManager {
         std::unique_lock lock(viewsMutex);
         auto it = views.find(viewId);
         if (it != views.end()) {
-            it->second->order = order;
+            it->second->order.store(order);
             logger::debug("SetOrder: Set order {} for view [{}]", order, viewId);
         } else {
             logger::warn("SetOrder: View ID [{}] not found.", viewId);
@@ -557,7 +557,7 @@ namespace PrismaUI::ViewManager {
         std::shared_lock lock(viewsMutex);
         auto it = views.find(viewId);
         if (it != views.end()) {
-            return it->second->order;
+            return it->second->order.load();
         }
         logger::warn("GetOrder: View ID [{}] not found, returning -1.", viewId);
         return -1;

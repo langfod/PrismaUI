@@ -64,7 +64,7 @@ namespace PrismaUI::Core {
         std::function<void(PrismaViewId, PRISMA_UI_API::ConsoleMessageLevel, const std::string&)> consoleMessageCallback;
         int scrollingPixelSize = 28;
         std::atomic<bool> isPaused = false;
-        int order = 0;
+        std::atomic<int> order = 0;
         std::atomic<bool> inspectorVisible = false;
         std::atomic<bool> needsRecovery = false;  // Flag for recovery after exception
         std::atomic<int> recoveryAttempts = 0;    // Track recovery attempts to prevent loops
@@ -83,9 +83,11 @@ namespace PrismaUI::Core {
         uint32_t inspectorTextureHeight = 0;
         float inspectorPosX = 0.0f;
         float inspectorPosY = 0.0f;
-        uint32_t inspectorDisplayWidth = 0;
-        uint32_t inspectorDisplayHeight = 0;
+        uint32_t inspectorDisplayWidth = 800u;
+        uint32_t inspectorDisplayHeight = 600u;
         float inspectorOpacity = 1.0f;
+        std::atomic<int> inspectorSavedOrder = 0;
+        std::atomic<bool> inspectorOrderRaised = false;
 
         // Primary view rendering data
         ID3D11Texture2D* texture = nullptr;

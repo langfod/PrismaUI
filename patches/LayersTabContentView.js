@@ -54,6 +54,7 @@ WI.LayersTabContentView = class LayersTabContentView extends WI.ContentBrowserTa
     static isTabAllowed()
     {
         // disable the Layers tab for now, as the backend support is not yet ready.
+        // TODO: re-enable is THREE.js support is added
         return false;
         // return InspectorBackend.hasDomain("LayerTree");
     }

@@ -98,25 +98,25 @@ namespace PrismaUI::Inspector {
 
     static void RaiseViewOrderForInspector(PrismaView* viewData) {
         if (!viewData || viewData->inspectorOrderRaised.load()) return;
-        int maxOrder = viewData->order;
+        int maxOrder = viewData->order.load();
         {
             std::shared_lock lock(viewsMutex);
             for (const auto& pair : views) {
-                if (pair.second) maxOrder = std::max(maxOrder, pair.second->order);
+                if (pair.second) maxOrder = std::max(maxOrder, pair.second->order.load());
             }
         }
-        viewData->inspectorSavedOrder = viewData->order;
-        viewData->order = maxOrder + 1;
+        viewData->inspectorSavedOrder.store(viewData->order.load());
+        viewData->order.store(maxOrder + 1);
         viewData->inspectorOrderRaised.store(true);
-        logger::debug("Inspector: raised view [{}] order to {} (was {})", viewData->id, viewData->order,
-                      viewData->inspectorSavedOrder);
+        logger::debug("Inspector: raised view [{}] order to {} (was {})", viewData->id, viewData->order.load(),
+                      viewData->inspectorSavedOrder.load());
     }
 
     static void RestoreViewOrderForInspector(PrismaView* viewData) {
         if (!viewData || !viewData->inspectorOrderRaised.load()) return;
-        viewData->order = viewData->inspectorSavedOrder;
+        viewData->order.store(viewData->inspectorSavedOrder.load());
         viewData->inspectorOrderRaised.store(false);
-        logger::debug("Inspector: restored view [{}] order to {}", viewData->id, viewData->order);
+        logger::debug("Inspector: restored view [{}] order to {}", viewData->id, viewData->order.load());
     }
 
     void CreateInspectorView(const PrismaViewId& viewId) {

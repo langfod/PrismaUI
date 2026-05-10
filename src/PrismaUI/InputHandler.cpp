@@ -44,7 +44,7 @@ namespace PrismaUI::InputHandler {
         ResizingN, ResizingS, ResizingE, ResizingW,
         ResizingNE, ResizingNW, ResizingSE, ResizingSW
     };
-    static InspectorDragMode g_inspectorDragMode = InspectorDragMode::None;
+    static std::atomic<InspectorDragMode> g_inspectorDragMode{InspectorDragMode::None};
     static int g_dragStartMouseX = 0, g_dragStartMouseY = 0;
     static float g_dragStartInspX = 0.0f, g_dragStartInspY = 0.0f;
     static uint32_t g_dragStartInspW = 0, g_dragStartInspH = 0;
@@ -742,7 +742,7 @@ namespace PrismaUI::InputHandler {
             }
             if (prevViewData && prevViewData->inspectorVisible.load()) {
                 if (prevViewData->inspectorOrderRaised.load()) {
-                    prevViewData->order = prevViewData->inspectorSavedOrder;
+                    prevViewData->order.store(prevViewData->inspectorSavedOrder.load());
                     prevViewData->inspectorOrderRaised.store(false);
                 }
                 prevViewData->inspectorOpacity = 0.85f;
@@ -814,7 +814,7 @@ namespace PrismaUI::InputHandler {
 
                             // Relinquish inspector focus/z-order
                             if (targetViewData->inspectorOrderRaised.load()) {
-                                targetViewData->order = targetViewData->inspectorSavedOrder;
+                                targetViewData->order.store(targetViewData->inspectorSavedOrder.load());
                                 targetViewData->inspectorOrderRaised.store(false);
                             }
                             targetViewData->inspectorOpacity = 0.85f;
@@ -1014,7 +1014,7 @@ namespace PrismaUI::InputHandler {
                                             if (inspectorView) inspectorView->Resize(newW, newH);
                                         }
                                     } else if (arg.type == ultralight::MouseEvent::kType_MouseUp) {
-                                        g_inspectorDragMode = InspectorDragMode::None;
+                                        g_inspectorDragMode.store(InspectorDragMode::None, std::memory_order_relaxed);
                                     }
                                     return;
                                 }
@@ -1036,15 +1036,15 @@ namespace PrismaUI::InputHandler {
                                         targetViewData->inspectorOpacity = 1.0f;
 
                                         if (!targetViewData->inspectorOrderRaised.load()) {
-                                            int maxOrder = targetViewData->order;
+                                            int maxOrder = targetViewData->order.load();
                                             {
                                                 std::shared_lock lock(*g_viewsMapMutex);
                                                 for (const auto& pair : *g_viewsMap) {
-                                                    if (pair.second) maxOrder = std::max(maxOrder, pair.second->order);
+                                                    if (pair.second) maxOrder = std::max(maxOrder, pair.second->order.load());
                                                 }
                                             }
-                                            targetViewData->inspectorSavedOrder = targetViewData->order;
-                                            targetViewData->order = maxOrder + 1;
+                                            targetViewData->inspectorSavedOrder.store(targetViewData->order.load());
+                                            targetViewData->order.store(maxOrder + 1);
                                             targetViewData->inspectorOrderRaised.store(true);
                                         }
 
@@ -1084,7 +1084,7 @@ namespace PrismaUI::InputHandler {
                                         if (!ulView->HasFocus()) ulView->Focus();
                                         targetViewData->inspectorOpacity = 0.85f;
                                         if (targetViewData->inspectorOrderRaised.load()) {
-                                            targetViewData->order = targetViewData->inspectorSavedOrder;
+                                            targetViewData->order.store(targetViewData->inspectorSavedOrder.load());
                                             targetViewData->inspectorOrderRaised.store(false);
                                         }
                                     }
@@ -1131,7 +1131,7 @@ namespace PrismaUI::InputHandler {
 
     void Shutdown() {
         DisableInputCapture(0);
-        g_inspectorDragMode = InspectorDragMode::None;
+        g_inspectorDragMode.store(InspectorDragMode::None, std::memory_order_relaxed);
         {
             std::lock_guard lock(g_eventQueueMutex);
             g_eventQueue.clear();

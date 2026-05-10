@@ -282,7 +282,7 @@ namespace PrismaUI::ViewRenderer {
 
         std::sort(viewsToDraw.begin(), viewsToDraw.end(),
                   [](const std::shared_ptr<Core::PrismaView>& a, const std::shared_ptr<Core::PrismaView>& b) {
-                      return a->order < b->order;
+                      return a->order.load() < b->order.load();
                   });
 
         try {

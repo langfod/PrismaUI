@@ -1,4 +1,5 @@
 ﻿#include "Core.h"
+#include "Platform/SKSEHost.h"
 
 #include <eh.h>  // For _set_se_translator
 
@@ -103,7 +104,7 @@ namespace PrismaUI::Core {
     ID3D11DeviceContext* d3dContext = nullptr;
     HWND hWnd = nullptr;
 
-    RE::BSGraphics::ScreenSize screenSize;
+    Platform::GameServices::ScreenSize screenSize;
 
     std::unique_ptr<DirectX::SpriteBatch> spriteBatch;
     std::unique_ptr<DirectX::CommonStates> commonStates;
@@ -115,19 +116,21 @@ namespace PrismaUI::Core {
     std::map<std::pair<PrismaViewId, std::string>, JSCallbackData> PrismaUI::Core::jsCallbacks;
     std::mutex PrismaUI::Core::jsCallbacksMutex;
 
-    inline REL::Relocation<Hooks::D3DPresentHook::D3DPresentFunc> RealD3dPresentFunc;
+    std::atomic<Hooks::D3DPresentHook::D3DPresentFunc*> RealD3dPresentFunc{nullptr};
 
     PrismaView::~PrismaView() { ViewRenderer::ReleaseViewTexture(this); }
 
     void InitializeCoreSystem() {
         logger::info("Initializing PrismaUI Core System...");
-        InitHooks();
+        if (!InitHooks()) {
+            return;
+        }
 
         const auto basePath = Utils::GetBasePath();
         ultralightThread
             .submit([basePath]() {
                 try {
-                    Platform& plat = Platform::instance();
+                    ultralight::Platform& plat = ultralight::Platform::instance();
                     ultralightLogger = std::make_unique<MyUltralightLogger>();
                     plat.set_logger(ultralightLogger.get());
                     plat.set_font_loader(ultralight::GetPlatformFontLoader());
@@ -164,35 +167,48 @@ namespace PrismaUI::Core {
 
         PrismaVR::Initialize();
 
-        auto ui = RE::UI::GetSingleton();
-        if (!PrismaVR::IsVRActive()) {
-            ui->Register(FocusMenu::MENU_NAME, FocusMenu::Creator);
-        } else {
-            logger::info("VR detected — skipping FocusMenu (cursor) registration. Laser interaction active.");
-        }
-
         logger::info("PrismaUI Core System Initialized.");
     }
 
-    void InitHooks() {
+    bool InitHooks() noexcept {
         logger::debug("Installing D3D Present hook...");
-        RealD3dPresentFunc = Hooks::D3DPresentHook::Install(&D3DPresent);
-        logger::info("D3D Present hook installed.");
+        try {
+            Hooks::D3DPresentHook::Install(&D3DPresent, RealD3dPresentFunc);
+            logger::info("D3D Present hook installed.");
+            return true;
+        } catch (const std::runtime_error& exception) {
+            RealD3dPresentFunc.store(nullptr, std::memory_order_release);
+            rendererInitFailed.store(true);
+            logger::critical("Failed to install D3D Present hook; core initialization aborted: {}", exception.what());
+            return false;
+        } catch (const std::exception& exception) {
+            RealD3dPresentFunc.store(nullptr, std::memory_order_release);
+            rendererInitFailed.store(true);
+            logger::critical("Unexpected error while installing D3D Present hook; core initialization aborted: {}",
+                             exception.what());
+            return false;
+        } catch (...) {
+            RealD3dPresentFunc.store(nullptr, std::memory_order_release);
+            rendererInitFailed.store(true);
+            logger::critical("Unknown error while installing D3D Present hook; core initialization aborted.");
+            return false;
+        }
     }
 
     void InitGraphics() {
-        auto* renderManager = RE::BSGraphics::Renderer::GetSingleton();
-        if (!renderManager) {
-            logger::critical("InitGraphics: RenderManager is null!");
+        const auto graphics = Platform::GameServices::GetGraphicsState();
+        if (!graphics) {
+            logger::critical("InitGraphics: Skyrim graphics state is unavailable!");
             return;
         }
-        auto runtimeData = renderManager->GetRuntimeData();
-        if (!d3dDevice) d3dDevice = reinterpret_cast<ID3D11Device*>(runtimeData.forwarder);
-        if (!d3dContext) d3dContext = reinterpret_cast<ID3D11DeviceContext*>(runtimeData.context);
+        if (!d3dDevice) d3dDevice = graphics->device;
+        if (!d3dContext) d3dContext = graphics->context;
+        if (graphics->screenSize.width != 0 && graphics->screenSize.height != 0) {
+            screenSize = graphics->screenSize;
+        }
 
-        if (!hWnd && runtimeData.renderWindows && runtimeData.renderWindows->hWnd) {
-            hWnd = reinterpret_cast<HWND>(runtimeData.renderWindows->hWnd);
-            screenSize = renderManager->GetScreenSize();
+        if (!hWnd && graphics->window) {
+            hWnd = graphics->window;
 
             static std::atomic<bool> input_handler_initialized = false;
             bool expected_ih_init = false;
@@ -214,7 +230,7 @@ namespace PrismaUI::Core {
                     logger::info("WndProc hook installed successfully from render thread.");
                 } else {
                     logger::warn("Direct installation failed, scheduling on main thread...");
-                    SKSE::GetTaskInterface()->AddTask([]() {
+                    Platform::SKSEHost::AddTask([]() {
                         logger::info("Attempting to install WndProc hook from main thread...");
                         if (InstallWndProcHook()) {
                             logger::info("WndProc hook installed successfully from main thread.");
@@ -261,7 +277,11 @@ namespace PrismaUI::Core {
     }
 
     void D3DPresent(uint32_t a_p1) {
-        RealD3dPresentFunc(a_p1);
+        const auto realD3dPresent = RealD3dPresentFunc.load(std::memory_order_acquire);
+        if (!realD3dPresent) {
+            return;
+        }
+        realD3dPresent(a_p1);
 
         if (!coreInitialized || rendererInitFailed) return;
 

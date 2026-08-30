@@ -1,4 +1,5 @@
 ﻿#include "API.h"
+#include "Platform/SKSEHost.h"
 #include "Utils/Encoding.h"
 #include "PrismaUI/ViewManager.h"
 #include "PrismaUI/Communication.h"
@@ -12,7 +13,7 @@ PrismaView PluginAPI::PrismaUIInterface::CreateView(const char* htmlPath, PRISMA
     std::function<void(PrismaUI::Core::PrismaViewId)> domReadyWrapper = nullptr;
     if (onDomReadyCallback) {
         domReadyWrapper = [onDomReadyCallback](PrismaUI::Core::PrismaViewId viewId) {
-            SKSE::GetTaskInterface()->AddTask([callback = onDomReadyCallback, id = viewId]() {
+            PrismaUI::Platform::SKSEHost::AddTask([callback = onDomReadyCallback, id = viewId]() {
                 callback(id);
             });
         };
@@ -45,7 +46,7 @@ void PluginAPI::PrismaUIInterface::Invoke(PrismaView view, const char* script, P
 
     if (callback) {
         callbackWrapper = [callback](const std::string& result) {
-            SKSE::GetTaskInterface()->AddTask([targetCallback = callback, data = result]() {
+            PrismaUI::Platform::SKSEHost::AddTask([targetCallback = callback, data = result]() {
                 targetCallback(data.c_str());
             });
         };
@@ -82,7 +83,7 @@ void PluginAPI::PrismaUIInterface::RegisterJSListener(PrismaView view, const cha
     }
 
     std::function<void(std::string)> callbackWrapper = [callback](const std::string& arg) {
-        SKSE::GetTaskInterface()->AddTask([targetCallback = callback, data = arg]() {
+        PrismaUI::Platform::SKSEHost::AddTask([targetCallback = callback, data = arg]() {
             targetCallback(data.c_str());
         });
     };
@@ -231,7 +232,7 @@ void PluginAPI::PrismaUIInterface::RegisterConsoleCallback(PrismaView view, PRIS
 
 	if (callback) {
 		auto wrappedCallback = [callback](PrismaUI::Core::PrismaViewId id, PRISMA_UI_API::ConsoleMessageLevel level, const std::string& msg) {
-			SKSE::GetTaskInterface()->AddTask([callback, id, level, msg]() {
+            PrismaUI::Platform::SKSEHost::AddTask([callback, id, level, msg]() {
 				callback(id, level, msg.c_str());
 			});
 		};

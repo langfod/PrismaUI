@@ -20,7 +20,20 @@ Skyrim Next-Gen Web UI Framework.
 - Visual Studio 2022 with C++23 support
 - C++23 Compiler (MSVC)
 - [Ultralight SDK](https://ultralig.ht/download) 1.4.1-dev
-  - place the archive "ultralight-free-sdk-1.4.1-dev-win-x64.7z" in the "external folder.
+  - Place the archive "ultralight-free-sdk-1.4.1-dev-win-x64.7z" in the "external" folder.
+
+### Runtime Requirements
+
+End users must install the Address Library matching their Skyrim executable. PrismaUI does not bundle or fall back to
+an address database. It loads the standard file from `Data/SKSE/Plugins`:
+
+- Skyrim SE: `version-<runtime>.bin`
+- Skyrim AE: `versionlib-<runtime>.bin`
+- Skyrim VR: `version-<runtime>.csv`
+
+PrismaUI supports Address Library binary formats 1, 2, and 5 plus the VR CSV format. A matching database is necessary
+but does not by itself guarantee compatibility: the runtime must also have a validated PrismaUI ABI profile. Unknown
+runtime layouts fail during plugin loading before hooks are installed.
 
 ### Getting Started
 
@@ -78,6 +91,9 @@ vcpkg upgrade
 ## Dependencies / Acknowledgments
 
 This plugin utilizes the [**Ultralight](https://ultralig.ht) SDK** for rendering web content.
+
+The plugin communicates directly with SKSE through the bundled, permissively licensed SKSE interface declarations.
+It does not link CommonLibSSE-NG.
 
 The Ultralight SDK is provided under the [**Ultralight Free License Agreement**](https://ultralig.ht/free-license/LICENSE.txt). The full terms of this license are available in the `NOTICES.txt` file located at the root of this repository.
 

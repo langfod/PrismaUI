@@ -1,29 +1,36 @@
 ﻿#include "API/API.h"
-#include "Menus/CursorMenu/CursorMenu.h"
+#include "Platform/Logging.h"
+#include "Platform/Runtime.h"
+#include "Platform/SKSEHost.h"
 #include "PrismaUI_API.h"
 #include "Utils/DllLoader.h"
-#include <spdlog/sinks/basic_file_sink.h>
 
-static void SKSEMessageHandler(SKSE::MessagingInterface::Message *message) {
-  switch (message->type) {
-  case SKSE::MessagingInterface::kDataLoaded:
-    CursorMenuEx::InstallHook();
-    break;
+extern "C" DLLEXPORT bool __cdecl
+SKSEPlugin_Load(const PrismaUI::Platform::SKSEHost::LoadInterface *a_skse) {
+
+  if (!PrismaUI::Platform::SKSEHost::Initialize(a_skse)) {
+    OutputDebugStringA("PrismaUI: failed to initialize raw SKSE interfaces\n");
+    return false;
   }
-}
 
-extern "C" DLLEXPORT bool SKSEAPI
-SKSEPlugin_Load(const SKSE::LoadInterface *a_skse) {
+  std::string runtimeError;
+  if (!PrismaUI::Platform::InitializeRuntime(PrismaUI::Platform::SKSEHost::RuntimeVersion(), runtimeError)) {
+    OutputDebugStringA(("PrismaUI: " + runtimeError + "\n").c_str());
+    MessageBoxA(nullptr, runtimeError.c_str(), "PrismaUI could not load", MB_OK | MB_ICONERROR);
+    return false;
+  }
+  if (!PrismaUI::Platform::Logging::Initialize(PrismaUI::Platform::GetRuntimeContext().Family(), runtimeError)) {
+    OutputDebugStringA(("PrismaUI: " + runtimeError + "\n").c_str());
+    return false;
+  }
 
-  SKSE::Init(a_skse, false); // false = don't initialize logger by default
-  logger::init();
-  // pattern: [2024-01-01 12:00:00.000] [info] [1234] [sourcefile.cpp:123] Log message
-  spdlog::set_pattern("[%Y-%m-%d %T.%e] [%l] [%t] [%s:%#] %v");
-
-  logger::info("---------------- {} {} by {} ----------------", SKSE::GetPluginName(), SKSE::GetPluginVersion(), SKSE::GetPluginAuthor());
-  logger::info("-------------------- Docs and Guides: https://prismaui.dev -------------------");
-  logger::info("------------------- built using CommonLibSSE-NG v{} -------------------", COMMONLIBSSE_VERSION);
-  logger::info("------------------- Running on Skyrim v{} -------------------", REL::Module::get().version().string());
+  logger::debug("---------------- PrismaUI {} by {} ----------------", PRISMAUI_VERSION,
+               "StarkMP <discord: starkmp>");
+  logger::debug("-------------------- Docs and Guides: https://prismaui.dev -------------------");
+  logger::debug("------------------- Running on Skyrim v{} -------------------",
+               PrismaUI::Platform::GetRuntimeContext().Version().String());
+  logger::debug("Validated Address Library and ABI profile for Skyrim v{}",
+               PrismaUI::Platform::GetRuntimeContext().Version().String());
 
   // Load Ultralight DLLs from Data/PrismaUI/libs before any Ultralight API usage
   if (!PrismaUI::Utils::DllLoader::GetSingleton().LoadUltralightLibraries()) {
@@ -31,22 +38,10 @@ SKSEPlugin_Load(const SKSE::LoadInterface *a_skse) {
     return false;
   }
 
-  auto g_messaging = reinterpret_cast<SKSE::MessagingInterface *>(
-      a_skse->QueryInterface(SKSE::LoadInterface::kMessaging));
-
-    if (!g_messaging) {
-        logger::critical("Failed to load messaging interface! This error is fatal, plugin will not load.");
-        return false;
-    }
-
-    SKSE::AllocTrampoline(1 << 10);
-
-    g_messaging->RegisterListener("SKSE", SKSEMessageHandler);
-
   return true;
 }
 
-extern "C" DLLEXPORT void *SKSEAPI
+extern "C" DLLEXPORT void *__cdecl
 RequestPluginAPI(const PRISMA_UI_API::InterfaceVersion a_interfaceVersion) {
   auto api = PluginAPI::PrismaUIInterface::GetSingleton();
 

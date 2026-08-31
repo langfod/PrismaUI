@@ -20,6 +20,9 @@ set(CMAKE_INSTALL_MESSAGE LAZY)
 
 project(PrismaUI VERSION 1.5.0 LANGUAGES CXX)
 
+include(CTest)
+option(PRISMAUI_BUILD_PLATFORM_TESTS "Build standalone PrismaUI platform tests" ON)
+
 # Set build root for external builds
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 set(BUILD_ROOT "${CMAKE_SOURCE_DIR}/build")
@@ -27,6 +30,10 @@ set(BUILD_ROOT "${CMAKE_SOURCE_DIR}/build")
 # Include compiler flags configuration
 include(CompilerFlags)
 include(ExternalDependencies)
+
+find_package(fmt CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
+find_package(directxtk CONFIG REQUIRED)
 
 # Collect source files
 file(GLOB_RECURSE SOURCES
@@ -41,16 +48,8 @@ source_group(
     FILES ${SOURCES}
 )
 
-# Add the plugin using CommonLibSSE function
-add_commonlibsse_plugin(${PROJECT_NAME}
-    NAME "PrismaUI"
-    AUTHOR "StarkMP <discord: starkmp>"
-    EMAIL ""
-    USE_ADDRESS_LIBRARY
-    MINIMUM_SKSE_VERSION "2.0.1.04"
-    VERSION ${PROJECT_VERSION}
-    SOURCES ${SOURCES}
-)
+add_library(${PROJECT_NAME} SHARED ${SOURCES})
+target_compile_definitions(${PROJECT_NAME} PRIVATE PRISMAUI_VERSION="${PROJECT_VERSION}")
 
 # Include directories
 target_include_directories(${PROJECT_NAME}
@@ -74,6 +73,14 @@ target_link_libraries(${PROJECT_NAME}
     WebCore
     comctl32  # Required for SetWindowSubclass/RemoveWindowSubclass
     imm32     # Required for IME (Input Method Editor) support
+    shell32   # Required for SHGetKnownFolderPath (log directory)
+    D3D11
+    DXGI
+    ole32
+    version
+    fmt::fmt
+    spdlog::spdlog
+    Microsoft::DirectXTK
 )
 
 # Delay-load Ultralight DLLs so they can be loaded from custom path at runtime
@@ -95,7 +102,23 @@ target_precompile_headers(${PROJECT_NAME}
     PRIVATE
     "src/PCH.h"
 )
-add_external_dependencies(${PROJECT_NAME})
+if(PRISMAUI_BUILD_PLATFORM_TESTS)
+    add_executable(PrismaUIPlatformTests
+        tests/Platform/AddressLibraryTests.cpp
+        src/Platform/AddressLibrary.cpp
+        src/Platform/RuntimeContext.cpp
+    )
+    target_include_directories(PrismaUIPlatformTests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    target_link_libraries(PrismaUIPlatformTests PRIVATE fmt::fmt spdlog::spdlog)
+    target_compile_definitions(PrismaUIPlatformTests PRIVATE
+        WIN32_LEAN_AND_MEAN
+        NOMINMAX
+        UNICODE
+        _UNICODE
+        PRISMAUI_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+    add_test(NAME PrismaUI.Platform COMMAND PrismaUIPlatformTests)
+endif()
 
 # Set output directory
 set_target_properties(${PROJECT_NAME} PROPERTIES

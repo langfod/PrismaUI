@@ -22,6 +22,11 @@ namespace PrismaUI::Core {
 namespace PrismaUI::InputHandler {
     using namespace ultralight;
 
+    struct CursorPosition {
+        int x;
+        int y;
+    };
+
     // Wrapper for scroll events that includes mouse position for proper routing
     struct ScrollEventWithPosition {
         ScrollEvent event;
@@ -45,6 +50,7 @@ namespace PrismaUI::InputHandler {
 
     // The currently focused view ID (0 if none)
     Core::PrismaViewId GetFocusedViewId();
+    CursorPosition GetCursorPosition() noexcept;
 
     bool InstallWndProcHook();
     void UninstallWndProcHook();

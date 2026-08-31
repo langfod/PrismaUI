@@ -10,6 +10,7 @@
 #pragma warning(pop)
 
 #include <DirectXTK/CommonStates.h>
+#include <DirectXTK/SimpleMath.h>
 #include <DirectXTK/SpriteBatch.h>
 #include <DirectXTK/WICTextureLoader.h>
 #include <d3d11.h>
@@ -31,7 +32,7 @@
 #include <vector>
 
 #include "Hooks/Hooks.h"
-#include "Menus/FocusMenu/FocusMenu.h"
+#include "Platform/GameServices.h"
 #include "Utils/NanoID.h"
 #include "Utils/SingleThreadExecutor.h"
 
@@ -118,7 +119,7 @@ namespace PrismaUI::Core {
     extern ID3D11Device* d3dDevice;
     extern ID3D11DeviceContext* d3dContext;
     extern HWND hWnd;
-    extern RE::BSGraphics::ScreenSize screenSize;
+    extern Platform::GameServices::ScreenSize screenSize;
     extern std::unique_ptr<DirectX::SpriteBatch> spriteBatch;
     extern std::unique_ptr<DirectX::CommonStates> commonStates;
     extern Microsoft::WRL::ComPtr<ID3D11ShaderResourceView> cursorTexture;
@@ -137,10 +138,10 @@ namespace PrismaUI::Core {
     extern std::map<std::pair<PrismaViewId, std::string>, JSCallbackData> jsCallbacks;
     extern std::mutex jsCallbacksMutex;
 
-    extern inline REL::Relocation<Hooks::D3DPresentHook::D3DPresentFunc> RealD3dPresentFunc;
+    extern std::atomic<Hooks::D3DPresentHook::D3DPresentFunc*> RealD3dPresentFunc;
 
     void InitializeCoreSystem();
-    void InitHooks();
+    [[nodiscard]] bool InitHooks() noexcept;
     void InitGraphics();
     void D3DPresent(uint32_t a_p1);
     void Shutdown();

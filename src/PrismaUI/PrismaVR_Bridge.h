@@ -1,4 +1,6 @@
 #pragma once
+
+#include "Platform/GameServices.h"
 // PrismaVR_Bridge.h — Thin accessor layer for Prisma UI internals.
 // This is the ONLY VR file that directly touches PrismaView fields.
 // If Prisma renames a field, only this file needs a one-line fix.
@@ -106,27 +108,19 @@ namespace PrismaVR_Bridge {
 	// Works on both OpenComposite and SteamVR via Skyrim's ControlMap.
 
 	inline void MaskCombatControls() {
-		auto controlMap = RE::ControlMap::GetSingleton();
-		if (!controlMap) return;
-		controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kFighting, false, false);
+		PrismaUI::Platform::GameServices::ToggleControl(PrismaUI::Platform::GameServices::Control::kFighting, false);
 	}
 
 	inline void UnmaskCombatControls() {
-		auto controlMap = RE::ControlMap::GetSingleton();
-		if (!controlMap) return;
-		controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kFighting, true, false);
+		PrismaUI::Platform::GameServices::ToggleControl(PrismaUI::Platform::GameServices::Control::kFighting, true);
 	}
 
 	inline void MaskMovement() {
-		auto controlMap = RE::ControlMap::GetSingleton();
-		if (!controlMap) return;
-		controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kMovement, false, false);
+		PrismaUI::Platform::GameServices::ToggleControl(PrismaUI::Platform::GameServices::Control::kMovement, false);
 	}
 
 	inline void UnmaskMovement() {
-		auto controlMap = RE::ControlMap::GetSingleton();
-		if (!controlMap) return;
-		controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kMovement, true, false);
+		PrismaUI::Platform::GameServices::ToggleControl(PrismaUI::Platform::GameServices::Control::kMovement, true);
 	}
 
 	// --- JavaScript execution (for injecting VR cursor into HTML views) ---

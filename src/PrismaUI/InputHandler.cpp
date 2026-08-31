@@ -1,4 +1,5 @@
 #include "InputHandler.h"
+#include "Platform/SKSEHost.h"
 
 #include <commctrl.h>
 
@@ -22,17 +23,16 @@ namespace PrismaUI::InputHandler {
     std::mutex g_focusedViewIdMutex;
 
     std::atomic<bool> g_isAnyInputCaptureActive = false;
+    std::atomic<int> g_cursorX = 0;
+    std::atomic<int> g_cursorY = 0;
 
     std::mutex g_eventQueueMutex;
     std::vector<InputEvent> g_eventQueue;
-
-    const int SCROLL_LINES_PER_WHEEL_DELTA = 1;
 
     // Clipboard safety limits
     constexpr size_t MAX_CLIPBOARD_SIZE = 1024 * 1024;  // 1MB max
     constexpr size_t MAX_CLIPBOARD_CHARS = 200000;      // 200K characters max
 
-    bool g_mouseButtonStates[3] = {false, false, false};
     wchar_t g_pendingHighSurrogate = 0;
 
     // WndProc subclass state
@@ -304,140 +304,53 @@ namespace PrismaUI::InputHandler {
         return std::wstring{high, low};
     }
 
-    class MouseEventListener : public RE::BSTEventSink<RE::InputEvent*> {
-    public:
-        static MouseEventListener* GetSingleton() {
-            static MouseEventListener singleton;
-            return &singleton;
+    void QueueMouseEvent(ultralight::MouseEvent::Type type, ultralight::MouseEvent::Button button, int x, int y) {
+        g_cursorX.store(x, std::memory_order_relaxed);
+        g_cursorY.store(y, std::memory_order_relaxed);
+        ultralight::MouseEvent event;
+        event.type = type;
+        event.x = x;
+        event.y = y;
+        event.button = button;
+        std::lock_guard lock(g_eventQueueMutex);
+        g_eventQueue.emplace_back(event);
+    }
+
+    void QueueMouseWheel(HWND hwnd, WPARAM wParam, LPARAM lParam) {
+        POINT point{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        ScreenToClient(hwnd, &point);
+        g_cursorX.store(point.x, std::memory_order_relaxed);
+        g_cursorY.store(point.y, std::memory_order_relaxed);
+
+        int scrollPixelSize = 28;
+        Core::PrismaViewId focusedViewId;
+        {
+            std::lock_guard lock(g_focusedViewIdMutex);
+            focusedViewId = g_currentlyFocusedViewId;
         }
-
-        RE::BSEventNotifyControl ProcessEvent(
-            RE::InputEvent* const* a_event,
-            [[maybe_unused]] RE::BSTEventSource<RE::InputEvent*>* a_eventSource) override {
-            if (!a_event || !*a_event || !g_isAnyInputCaptureActive.load()) {
-                return RE::BSEventNotifyControl::kContinue;
-            }
-
-            // In VR, PrismaVR laser input owns pointer and scroll events.
-            if (PrismaVR::IsVRActive()) {
-                return RE::BSEventNotifyControl::kContinue;
-            }
-
-            auto cursor = RE::MenuCursor::GetSingleton();
-            if (!cursor) {
-                return RE::BSEventNotifyControl::kContinue;
-            }
-
-            for (auto event = *a_event; event; event = event->next) {
-                switch (event->GetEventType()) {
-                    case RE::INPUT_EVENT_TYPE::kMouseMove: {
-                        auto mouseMoveEvent = event->AsMouseMoveEvent();
-                        if (mouseMoveEvent) {
-                            ultralight::MouseEvent ev;
-                            ev.type = ultralight::MouseEvent::kType_MouseMoved;
-                            ev.x = static_cast<int>(cursor->cursorPosX);
-                            ev.y = static_cast<int>(cursor->cursorPosY);
-                            ev.button = ultralight::MouseEvent::kButton_None;
-
-                            std::lock_guard lock(g_eventQueueMutex);
-                            g_eventQueue.emplace_back(ev);
-                        }
-                        break;
-                    }
-
-                    case RE::INPUT_EVENT_TYPE::kButton: {
-                        auto buttonEvent = event->AsButtonEvent();
-                        if (!buttonEvent || buttonEvent->GetDevice() != RE::INPUT_DEVICE::kMouse) break;
-
-                        const auto idCode = buttonEvent->GetIDCode();
-                        bool isPressed = buttonEvent->IsPressed();
-                        bool isUp = buttonEvent->IsUp();
-
-                        if (idCode <= 2) {
-                            ultralight::MouseEvent::Button button = ultralight::MouseEvent::kButton_None;
-                            switch (idCode) {
-                                case 0:
-                                    button = ultralight::MouseEvent::kButton_Left;
-                                    break;
-                                case 1:
-                                    button = ultralight::MouseEvent::kButton_Right;
-                                    break;
-                                case 2:
-                                    button = ultralight::MouseEvent::kButton_Middle;
-                                    break;
-                            }
-
-                            if (isPressed && !g_mouseButtonStates[idCode]) {
-                                g_mouseButtonStates[idCode] = true;
-
-                                ultralight::MouseEvent ev;
-                                ev.type = ultralight::MouseEvent::kType_MouseDown;
-                                ev.x = static_cast<int>(cursor->cursorPosX);
-                                ev.y = static_cast<int>(cursor->cursorPosY);
-                                ev.button = button;
-
-                                std::lock_guard lock(g_eventQueueMutex);
-                                g_eventQueue.emplace_back(ev);
-                            } else if (isUp && g_mouseButtonStates[idCode]) {
-                                g_mouseButtonStates[idCode] = false;
-
-                                ultralight::MouseEvent ev;
-                                ev.type = ultralight::MouseEvent::kType_MouseUp;
-                                ev.x = static_cast<int>(cursor->cursorPosX);
-                                ev.y = static_cast<int>(cursor->cursorPosY);
-                                ev.button = button;
-
-                                std::lock_guard lock(g_eventQueueMutex);
-                                g_eventQueue.emplace_back(ev);
-                            }
-                        }
-
-                        else if (idCode == 8 || idCode == 9) {
-                            if (isPressed) {
-                                ScrollEventWithPosition scrollWithPos;
-                                scrollWithPos.event.type = ultralight::ScrollEvent::kType_ScrollByPixel;
-                                scrollWithPos.event.delta_x = 0;
-                                scrollWithPos.mouseX = static_cast<int>(cursor->cursorPosX);
-                                scrollWithPos.mouseY = static_cast<int>(cursor->cursorPosY);
-
-                                int scrollPixelSize = 28;
-
-                                Core::PrismaViewId focusedViewId;
-                                {
-                                    std::lock_guard lock(g_focusedViewIdMutex);
-                                    focusedViewId = g_currentlyFocusedViewId;
-                                }
-
-                                if (focusedViewId != 0) {
-                                    std::shared_lock lock(*g_viewsMapMutex);
-                                    auto it = g_viewsMap->find(focusedViewId);
-                                    if (it != g_viewsMap->end() && it->second) {
-                                        scrollPixelSize = it->second->scrollingPixelSize;
-                                    }
-                                }
-
-                                int scrollAmount = SCROLL_LINES_PER_WHEEL_DELTA * scrollPixelSize;
-                                if (idCode == 9) {
-                                    scrollWithPos.event.delta_y = -scrollAmount;
-                                } else {
-                                    scrollWithPos.event.delta_y = scrollAmount;
-                                }
-
-                                std::lock_guard lock(g_eventQueueMutex);
-                                g_eventQueue.emplace_back(scrollWithPos);
-                            }
-                        }
-                        break;
-                    }
-
-                    default:
-                        break;
+        if (focusedViewId != 0 && g_viewsMap && g_viewsMapMutex) {
+            std::shared_ptr<Core::PrismaView> view;
+            {
+                std::shared_lock lock(*g_viewsMapMutex);
+                const auto it = g_viewsMap->find(focusedViewId);
+                if (it != g_viewsMap->end()) {
+                    view = it->second;
                 }
             }
-
-            return RE::BSEventNotifyControl::kContinue;
+            if (view) {
+                scrollPixelSize = view->scrollingPixelSize;
+            }
         }
-    };
+
+        ScrollEventWithPosition event;
+        event.event.type = ultralight::ScrollEvent::kType_ScrollByPixel;
+        event.event.delta_x = 0;
+        event.event.delta_y = GET_WHEEL_DELTA_WPARAM(wParam) > 0 ? scrollPixelSize : -scrollPixelSize;
+        event.mouseX = point.x;
+        event.mouseY = point.y;
+        std::lock_guard lock(g_eventQueueMutex);
+        g_eventQueue.emplace_back(event);
+    }
 
     LRESULT CALLBACK SubclassProc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass,
                                   DWORD_PTR /*dwRefData*/) {
@@ -479,6 +392,38 @@ namespace PrismaUI::InputHandler {
                 }
 
                 switch (uMsg) {
+                    case WM_MOUSEMOVE:
+                        QueueMouseEvent(ultralight::MouseEvent::kType_MouseMoved,
+                                        ultralight::MouseEvent::kButton_None, GET_X_LPARAM(lParam),
+                                        GET_Y_LPARAM(lParam));
+                        handledByUI = true;
+                        break;
+                    case WM_LBUTTONDOWN:
+                    case WM_RBUTTONDOWN:
+                    case WM_MBUTTONDOWN: {
+                        const auto button = uMsg == WM_LBUTTONDOWN ? ultralight::MouseEvent::kButton_Left
+                                            : uMsg == WM_RBUTTONDOWN ? ultralight::MouseEvent::kButton_Right
+                                                                    : ultralight::MouseEvent::kButton_Middle;
+                        QueueMouseEvent(ultralight::MouseEvent::kType_MouseDown, button, GET_X_LPARAM(lParam),
+                                        GET_Y_LPARAM(lParam));
+                        handledByUI = true;
+                        break;
+                    }
+                    case WM_LBUTTONUP:
+                    case WM_RBUTTONUP:
+                    case WM_MBUTTONUP: {
+                        const auto button = uMsg == WM_LBUTTONUP ? ultralight::MouseEvent::kButton_Left
+                                            : uMsg == WM_RBUTTONUP ? ultralight::MouseEvent::kButton_Right
+                                                                  : ultralight::MouseEvent::kButton_Middle;
+                        QueueMouseEvent(ultralight::MouseEvent::kType_MouseUp, button, GET_X_LPARAM(lParam),
+                                        GET_Y_LPARAM(lParam));
+                        handledByUI = true;
+                        break;
+                    }
+                    case WM_MOUSEWHEEL:
+                        QueueMouseWheel(hwnd, wParam, lParam);
+                        handledByUI = true;
+                        break;
                     case WM_KEYDOWN: {
                         // Handle Ctrl+V (Paste)
                         if ((GetKeyState(VK_CONTROL) & 0x8000) && wParam == 'V') {
@@ -539,7 +484,7 @@ namespace PrismaUI::InputHandler {
 
                                             if (!selectedText.empty()) {
                                                 // Copy to clipboard on Skyrim main thread to avoid blocking
-                                                SKSE::GetTaskInterface()->AddTask([text = selectedText]() {
+                                                Platform::SKSEHost::AddTask([text = selectedText]() {
                                                     SetClipboardText(text);
                                                     logger::debug("Ctrl+C: Copied {} characters to clipboard",
                                                                   text.length());
@@ -644,12 +589,15 @@ namespace PrismaUI::InputHandler {
         g_viewsMap = viewsMap;
         g_viewsMapMutex = viewsMapMutex;
         g_isAnyInputCaptureActive = false;
+        POINT cursorPosition{};
+        if (GetCursorPos(&cursorPosition) && ScreenToClient(g_hWnd, &cursorPosition)) {
+            g_cursorX.store(cursorPosition.x, std::memory_order_relaxed);
+            g_cursorY.store(cursorPosition.y, std::memory_order_relaxed);
+        }
         {
             std::lock_guard lock(g_focusedViewIdMutex);
             g_currentlyFocusedViewId = 0;
         }
-
-        g_mouseButtonStates[0] = g_mouseButtonStates[1] = g_mouseButtonStates[2] = false;
 
         logger::info("PrismaUI::InputHandler Initialized with HWND: {}", (void*)g_hWnd);
 
@@ -660,14 +608,6 @@ namespace PrismaUI::InputHandler {
         g_imeHelper.SetContext({g_hWnd, g_viewsMap, g_viewsMapMutex});
         g_imeHelper.SetExecutor(g_ultralightThreadExecutor);
         g_imeHelper.Initialize(g_hWnd);
-
-        auto inputEventSource = RE::BSInputDeviceManager::GetSingleton();
-        if (inputEventSource) {
-            inputEventSource->AddEventSink(MouseEventListener::GetSingleton());
-            logger::info("MouseEventListener registered with BSInputDeviceManager");
-        } else {
-            logger::error("Failed to register MouseEventListener: BSInputDeviceManager is null");
-        }
 
         GamepadInputHandler::Initialize(g_ultralightThreadExecutor);
     }
@@ -739,8 +679,6 @@ namespace PrismaUI::InputHandler {
 
         g_imeHelper.SetAssociation(true);
 
-        g_mouseButtonStates[0] = g_mouseButtonStates[1] = g_mouseButtonStates[2] = false;
-
         //A view just gained focus. Clear stale button values so a held button re-fires on its next press:
         GamepadInputHandler::ResetButtonValues();
     }
@@ -764,8 +702,6 @@ namespace PrismaUI::InputHandler {
                 g_imeHelper.SetAssociation(false);
                 logger::debug("PrismaUI Input Capture System Disabled (was active for View [{}]).",
                               currentFocusedBeforeDisable);
-
-                g_mouseButtonStates[0] = g_mouseButtonStates[1] = g_mouseButtonStates[2] = false;
 
                 //Focus released. Reset button values so it doesn't leak into the next focused view.
                 GamepadInputHandler::ResetButtonValues();
@@ -816,6 +752,10 @@ namespace PrismaUI::InputHandler {
     Core::PrismaViewId GetFocusedViewId() {
         std::lock_guard lock(g_focusedViewIdMutex);
         return g_currentlyFocusedViewId;
+    }
+
+    CursorPosition GetCursorPosition() noexcept {
+        return {g_cursorX.load(std::memory_order_relaxed), g_cursorY.load(std::memory_order_relaxed)};
     }
 
     bool IsInputCaptureActiveForView(const Core::PrismaViewId& viewId) {
@@ -946,12 +886,6 @@ namespace PrismaUI::InputHandler {
         {
             std::lock_guard lock(g_eventQueueMutex);
             g_eventQueue.clear();
-        }
-
-        auto inputEventSource = RE::BSInputDeviceManager::GetSingleton();
-        if (inputEventSource) {
-            inputEventSource->RemoveEventSink(MouseEventListener::GetSingleton());
-            logger::debug("MouseEventListener removed from BSInputDeviceManager");
         }
 
         GamepadInputHandler::Shutdown();

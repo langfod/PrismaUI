@@ -6,7 +6,7 @@
 #include <string>
 #include <mutex>
 
-// Note: This header depends on 'logger' namespace from PCH.h (SKSE::log)
+// Note: This header depends on the project logger alias from PCH.h.
 
 namespace PrismaUI::Utils
 {

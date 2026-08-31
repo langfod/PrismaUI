@@ -11,6 +11,9 @@ build/
 vs*/
 instructions/
 
+/test-resources/addresslibrary/*.bin
+/test-resources/addresslibrary/*.csv
+
 # files
 *.zip
 compile_commands.json

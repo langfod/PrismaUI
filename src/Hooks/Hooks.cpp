@@ -1,14 +1,28 @@
 ﻿#include "Hooks.h"
 
-namespace Hooks {
-    template <typename T> uintptr_t __install(REL::Relocation<T> hook, void* func) {
-        auto& trampoline = SKSE::GetTrampoline();
-        return trampoline.write_call<5>(hook.address(), func);
-    }
+#include "Platform/Patching.h"
+#include "Platform/Runtime.h"
 
-    uintptr_t D3DPresentHook::Install(D3DPresentFunc* func)
+namespace Hooks {
+    void D3DPresentHook::Install(D3DPresentFunc* func, std::atomic<D3DPresentFunc*>& original)
     {
-        REL::Relocation<uint32_t> hook{ id, offset };
-        return __install(hook, func);
+        const auto address = PrismaUI::Platform::GetRelocations().Address(
+            PrismaUI::Platform::AddressKey::kD3DPresentCall);
+        if (!address) {
+            throw std::runtime_error("D3D present call relocation is unavailable");
+        }
+
+        std::string error;
+        const auto prepared = PrismaUI::Platform::Patching::PrepareCall5(
+            *address, reinterpret_cast<std::uintptr_t>(func), error);
+        if (!prepared) {
+            throw std::runtime_error(error);
+        }
+
+        original.store(reinterpret_cast<D3DPresentFunc*>(prepared->originalTarget), std::memory_order_release);
+        if (!PrismaUI::Platform::Patching::ApplyCall5(*prepared, error)) {
+            original.store(nullptr, std::memory_order_release);
+            throw std::runtime_error(error);
+        }
     }
 }

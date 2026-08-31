@@ -4,6 +4,7 @@
 #include "InputHandler.h"
 #include "Inspector.h"
 #include "Listeners.h"
+#include "Platform/GameServices.h"
 #include "PrismaVR.h"
 #include "ViewOperationQueue.h"
 
@@ -17,11 +18,11 @@ namespace PrismaUI::ViewManager {
             if (!renderer) {
                 coreInitialized = false;
                 logger::critical("Core initialization failed: Renderer not created.");
-                throw std::runtime_error("PrismaUI Core Renderer initialization failed.");
+                return 0;
             }
         } else if (!renderer) {
             logger::critical("Cannot create HTML view: Core Renderer is null despite initialization flag.");
-            throw std::runtime_error("PrismaUI Core Renderer is unexpectedly null.");
+            return 0;
         }
 
         Core::PrismaViewId newViewId = generator.generate();
@@ -74,10 +75,7 @@ namespace PrismaUI::ViewManager {
         }
 
         if (viewData->isPaused.load()) {
-            auto ui = RE::UI::GetSingleton();
-            if (ui && ui->numPausesGame > 0) {
-                ui->numPausesGame--;
-            }
+            Platform::GameServices::DecrementPauseCount();
             viewData->isPaused.store(false);
         }
 
@@ -87,22 +85,17 @@ namespace PrismaUI::ViewManager {
         }
         viewData->ultralightView->Unfocus();
 
-        if (closeFocusMenu && !PrismaVR::IsVRActive()) {
-            FocusMenu::Close();
-        }
-
         // Only re-enable controls if we disabled them (flatscreen only)
         if (!PrismaVR::IsVRActive()) {
-            auto controlMap = RE::ControlMap::GetSingleton();
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kWheelZoom, true, false);
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kLooking, true, false);
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kJumping, true, false);
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kMovement, true, false);
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kActivate, true, false);
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kPOVSwitch, true, false);
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kVATS, true, false);
-            // Added for gamepads:
-            controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kFighting, true, false);
+            using Platform::GameServices::Control;
+            Platform::GameServices::ToggleControl(Control::kWheelZoom, true);
+            Platform::GameServices::ToggleControl(Control::kLooking, true);
+            Platform::GameServices::ToggleControl(Control::kJumping, true);
+            Platform::GameServices::ToggleControl(Control::kMovement, true);
+            Platform::GameServices::ToggleControl(Control::kActivate, true);
+            Platform::GameServices::ToggleControl(Control::kPOVSwitch, true);
+            Platform::GameServices::ToggleControl(Control::kVATS, true);
+            Platform::GameServices::ToggleControl(Control::kFighting, true);
         }
     }
 
@@ -182,13 +175,13 @@ namespace PrismaUI::ViewManager {
         return views.find(viewId) != views.end();
     }
 
-    bool Focus(const Core::PrismaViewId& viewId, bool pauseGame, bool disableFocusMenu) {
+    bool Focus(const Core::PrismaViewId& viewId, bool pauseGame, [[maybe_unused]] bool disableFocusMenu) {
         if (!ViewManager::IsValid(viewId)) {
             logger::warn("Focus: View ID [{}] not found.", viewId);
             return false;
         }
 
-        ViewOperationQueue::EnqueueOperation(viewId, [viewId, pauseGame, disableFocusMenu]() {
+        ViewOperationQueue::EnqueueOperation(viewId, [viewId, pauseGame]() {
             std::shared_ptr<PrismaView> viewData = nullptr;
             {
                 std::shared_lock lock(viewsMutex);
@@ -248,28 +241,21 @@ namespace PrismaUI::ViewManager {
             viewData->ultralightView->Focus();
             PrismaUI::InputHandler::EnableInputCapture(viewId);
 
-            if (!disableFocusMenu && !PrismaVR::IsVRActive()) {
-                FocusMenu::Open();  // Flatscreen cursor — in VR, PrismaVR laser handles interaction
-            }
-
             // In VR, the menu is a floating 3D panel — player keeps full control
             if (!PrismaVR::IsVRActive()) {
-                auto controlMap = RE::ControlMap::GetSingleton();
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kWheelZoom, false, false);
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kLooking, false, false);
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kJumping, false, false);
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kMovement, false, false);
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kActivate, false, false);
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kPOVSwitch, false, false);
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kVATS, false, false);
-                // Added for gamepads:
-                controlMap->ToggleControls(RE::UserEvents::USER_EVENT_FLAG::kFighting, false, false);
+                using Platform::GameServices::Control;
+                Platform::GameServices::ToggleControl(Control::kWheelZoom, false);
+                Platform::GameServices::ToggleControl(Control::kLooking, false);
+                Platform::GameServices::ToggleControl(Control::kJumping, false);
+                Platform::GameServices::ToggleControl(Control::kMovement, false);
+                Platform::GameServices::ToggleControl(Control::kActivate, false);
+                Platform::GameServices::ToggleControl(Control::kPOVSwitch, false);
+                Platform::GameServices::ToggleControl(Control::kVATS, false);
+                Platform::GameServices::ToggleControl(Control::kFighting, false);
             }
 
             if (pauseGame && !PrismaVR::IsVRActive()) {
-                auto ui = RE::UI::GetSingleton();
-                if (ui) {
-                    ui->numPausesGame++;
+                if (Platform::GameServices::IncrementPauseCount()) {
                     viewData->isPaused.store(true);
                     logger::debug("Game paused for View [{}]", viewId);
                 }
@@ -300,21 +286,16 @@ namespace PrismaUI::ViewManager {
             if (!viewData) {
                 logger::warn("Unfocus: View [{}] not found during operation execution.", viewId);
                 PrismaUI::InputHandler::DisableInputCapture(0);
-                if (!PrismaVR::IsVRActive()) FocusMenu::Close();
                 return;
             }
 
             if (!viewData->ultralightView) {
                 logger::warn("Unfocus: View [{}] Ultralight View is not ready.", viewId);
                 if (viewData->isPaused.load()) {
-                    auto ui = RE::UI::GetSingleton();
-                    if (ui && ui->numPausesGame > 0) {
-                        ui->numPausesGame--;
-                    }
+                    Platform::GameServices::DecrementPauseCount();
                     viewData->isPaused.store(false);
                 }
                 PrismaUI::InputHandler::DisableInputCapture(viewId);
-                if (!PrismaVR::IsVRActive()) FocusMenu::Close();
                 return;
             }
 

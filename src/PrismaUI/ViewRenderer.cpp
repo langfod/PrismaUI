@@ -1,5 +1,4 @@
 ﻿#include "ViewRenderer.h"
-
 #include "Core.h"
 #include "InputHandler.h"
 #include "Inspector.h"
@@ -231,10 +230,7 @@ namespace PrismaUI::ViewRenderer {
             return;
         }
 
-        auto cursor = RE::MenuCursor::GetSingleton();
-        if (!cursor) {
-            return;
-        }
+        const auto cursor = PrismaUI::InputHandler::GetCursorPosition();
 
         ID3D11BlendState* backupBlendState = nullptr;
         FLOAT backupBlendFactor[4];
@@ -249,7 +245,7 @@ namespace PrismaUI::ViewRenderer {
 
         spriteBatch->Begin(DirectX::SpriteSortMode_Deferred, commonStates->AlphaBlend());
 
-        DirectX::SimpleMath::Vector2 position(cursor->cursorPosX, cursor->cursorPosY);
+        DirectX::SimpleMath::Vector2 position(static_cast<float>(cursor.x), static_cast<float>(cursor.y));
         spriteBatch->Draw(cursorTexture.Get(), position);
 
         spriteBatch->End();
